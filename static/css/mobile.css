@@ -1,0 +1,199 @@
+/*==================================================
+=                 RESPONSIVE MOBILE                =
+==================================================*/
+
+@media (max-width: 768px) {
+
+    /* ---------- Topbar ---------- */
+
+    #topbar {
+        height: 60px;
+        padding: 0 12px;
+    }
+
+    #container {
+        height: calc(100vh - 60px);
+    }
+
+    .logo {
+        gap: 10px;
+    }
+
+    .logo i {
+        font-size: 28px;
+    }
+
+    .logo h1 {
+        font-size: 18px;
+    }
+
+    .logo small {
+        display: none;
+    }
+
+    /* ---------- Cartão ---------- */
+
+    .info-card {
+        min-width: auto;
+        padding: 8px 10px;
+        gap: 8px;
+    }
+
+    .info-card i {
+        font-size: 18px;
+    }
+
+    .info-card span {
+        font-size: 10px;
+    }
+
+    .info-card strong {
+        font-size: 14px;
+    }
+
+    /* ---------- Botão Menu ---------- */
+
+    #menu-btn {
+        width: 44px;
+        height: 44px;
+        font-size: 26px;
+    }
+
+    /* ---------- Sidebar ---------- */
+
+    #sidebar {
+        top: 60px;
+        width: 240px;
+        height: calc(100vh - 60px);
+    }
+
+    /* ---------- Botões Leaflet ---------- */
+
+    .map-buttons button {
+        width: 38px;
+        height: 38px;
+        font-size: 18px;
+    }
+
+    .leaflet-control-zoom a {
+        width: 34px !important;
+        height: 34px !important;
+        line-height: 34px !important;
+    }
+
+    /* ---------- Popup ---------- */
+
+    .eq-popup {
+        width: min(260px, 75vw);
+    }
+
+    .eq-header {
+        padding: 12px;
+    }
+
+    .eq-mag {
+        width: 46px;
+        height: 46px;
+        font-size: 18px;
+        margin-right: 12px;
+    }
+
+    .eq-title h3 {
+        font-size: 15px;
+    }
+
+    .eq-title small {
+        font-size: 11px;
+    }
+
+    .eq-table td {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+
+    .eq-table td:nth-child(2) {
+        width: 70px;
+    }
+
+    /* ---------- Legenda ---------- */
+
+    .legend {
+        transform: scale(.85);
+        transform-origin: bottom left;
+    }
+
+}
+
+/*==================================================
+=                TELEFONES PEQUENOS                =
+==================================================*/
+
+@media (max-width: 480px) {
+
+    #topbar {
+        padding: 0 8px;
+    }
+
+    .top-info {
+        gap: 8px;
+    }
+
+    .logo h1 {
+        font-size: 16px;
+    }
+
+    .logo i {
+        font-size: 24px;
+    }
+
+    /* esconde o texto "Sismos" para ganhar espaço */
+    .info-card span {
+        display: none;
+    }
+
+    .info-card {
+        padding: 8px;
+    }
+
+    .info-card strong {
+        font-size: 13px;
+    }
+
+    .eq-popup {
+        width: min(220px, 80vw);
+    }
+
+    .eq-header {
+        padding: 10px;
+    }
+
+    .eq-mag {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+    }
+
+    .eq-title h3 {
+        font-size: 14px;
+    }
+
+    .eq-table td {
+        padding: 7px;
+        font-size: 11px;
+    }
+
+    .map-buttons {
+        gap: 6px;
+    }
+
+    .map-buttons button {
+        width: 34px;
+        height: 34px;
+        font-size: 16px;
+    }
+
+    .legend {
+        display: none;
+    }
+
+}

@@ -6,7 +6,8 @@ const loadingEl = document.getElementById("loading");
 const totalEl = document.getElementById("total-sismos");
 
 const map = L.map("map", {
-    zoomControl: false
+    zoomControl: false,
+    tap: true
 });
 
 L.control.zoom({
@@ -201,7 +202,7 @@ function definirLegenda() {
     legenda.onAdd = function () {
         const div = L.DomUtil.create("div", "legend");
         div.innerHTML = `
-        <div style="background-color: #000; padding: 5px; border-radius: 5px; color: #fff; font-size: 14px;">
+        <div style="background-color: #1b1f24; padding: 5px; border-radius: 5px; color: #fff; font-size: 14px;">
             <div class="legend-title">
                 <i class="bi bi-activity"></i>
                 Magnitude
