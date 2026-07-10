@@ -1,0 +1,470 @@
+/*==================================================
+=                 RESET / BASE                     =
+==================================================*/
+
+html,
+body{
+
+    margin:0;
+
+    height:100%;
+
+    overflow:hidden;
+
+    font-family:Arial,sans-serif;
+
+}
+
+/*==================================================
+=                    LAYOUT                        =
+==================================================*/
+
+#container{
+
+    height:calc(100vh - 72px);
+
+}
+
+#map{
+
+    width:100%;
+
+    height:100%;
+
+}
+
+/*==================================================
+=                    TOPBAR                        =
+==================================================*/
+
+#topbar{
+
+    height:72px;
+
+    display:flex;
+
+    align-items:center;
+
+    justify-content:space-between;
+
+    padding:0 25px;
+
+    background:#1b1f24;
+
+    border-bottom:1px solid #343a40;
+
+    box-shadow:0 3px 12px rgba(0,0,0,.35);
+
+}
+
+.left-side,
+.top-info{
+
+    display:flex;
+
+    align-items:center;
+
+}
+
+.left-side{
+
+    gap:18px;
+
+}
+
+.top-info{
+
+    gap:15px;
+
+}
+
+/*==================================================
+=                     LOGO                         =
+==================================================*/
+
+.logo{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:16px;
+
+}
+
+.logo i{
+
+    font-size:38px;
+
+    color:#ff7043;
+
+}
+
+.logo h1{
+
+    margin:0;
+
+    color:#fff;
+
+    font-size:24px;
+
+    font-weight:600;
+
+}
+
+.logo small{
+
+    color:#9fa8b1;
+
+    font-size:13px;
+
+}
+
+/*==================================================
+=                  INFO CARD                       =
+==================================================*/
+
+.info-card{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:12px;
+
+    min-width:150px;
+
+    padding:10px 16px;
+
+    border-radius:10px;
+
+    background:#252b31;
+
+    transition:.25s;
+
+}
+
+.info-card:hover{
+
+    background:#313840;
+
+}
+
+.info-card i{
+
+    font-size:22px;
+
+    color:#ff7043;
+
+}
+
+.info-card span{
+
+    display:block;
+
+    font-size:12px;
+
+    color:#9fa8b1;
+
+}
+
+.info-card strong{
+
+    display:block;
+
+    font-size:16px;
+
+    color:#fff;
+
+}
+
+/*==================================================
+=                 MENU BUTTON                      =
+==================================================*/
+
+#menu-btn{
+
+    width:52px;
+
+    height:52px;
+
+    border:none;
+
+    border-radius:10px;
+
+    background:#252b31;
+
+    color:#fff;
+
+    font-size:32px;
+
+    cursor:pointer;
+
+    transition:.25s;
+
+}
+
+#menu-btn:hover{
+
+    background:#ff7043;
+
+}
+
+#menu-btn.active{
+
+    background:#ff7043;
+
+}
+
+#menu-btn i{
+
+    transition:transform .25s ease,opacity .25s ease;
+
+}
+
+#menu-btn:hover i{
+
+    transform:scale(1.1);
+
+}
+
+#menu-btn.active i{
+
+    transform:rotate(90deg);
+
+}
+
+/*==================================================
+=                   SIDEBAR                        =
+==================================================*/
+
+#sidebar{
+
+    position:fixed;
+
+    top:72px;
+
+    right:-320px;
+
+    width:275px;
+
+    height:100vh;
+
+    background:#1d2228;
+
+    color:#fff;
+
+    z-index:5000;
+
+    transition:right .3s ease;
+
+    box-shadow:-4px 0 20px rgba(0,0,0,.35);
+
+}
+
+#sidebar.open{
+
+    right:0;
+
+}
+
+#sidebar ul{
+
+    margin:0;
+
+    padding:15px 0;
+
+    list-style:none;
+
+}
+
+#sidebar li{
+
+    padding:14px 24px;
+
+    cursor:pointer;
+
+    transition:.2s;
+
+}
+
+#sidebar li:hover{
+
+    background:#313840;
+
+}
+
+#sidebar li i{
+
+    width:22px;
+
+    margin-right:12px;
+
+    color:#ff7043;
+
+}
+
+/*==================================================
+=               LEAFLET CONTROLS                   =
+==================================================*/
+
+.leaflet-control-layers{
+
+    min-width:220px;
+
+    overflow:hidden;
+
+    color:#fff;
+
+    border:none;
+
+    border-radius:12px;
+
+    background:rgba(28,30,34,.94);
+
+    backdrop-filter:blur(8px);
+
+    box-shadow:0 8px 24px rgba(0,0,0,.35);
+
+}
+
+.leaflet-control-layers-expanded{
+
+    padding:0;
+
+}
+
+.leaflet-control-layers-base,
+.leaflet-control-layers-overlays{
+
+    padding:12px 16px;
+
+}
+
+.leaflet-control-layers-base::before{
+
+    content:"Mapa Base";
+
+}
+
+.leaflet-control-layers-overlays::before{
+
+    content:"Visualização";
+
+}
+
+.leaflet-control-layers-base::before,
+.leaflet-control-layers-overlays::before{
+
+    display:block;
+
+    margin-bottom:10px;
+
+    color:#9ca3af;
+
+    font-size:11px;
+
+    text-transform:uppercase;
+
+    letter-spacing:1px;
+
+}
+
+.leaflet-control-layers-separator{
+
+    margin:0;
+
+    border-top:1px solid #3a3f46;
+
+}
+
+.leaflet-control-layers label{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:10px;
+
+    padding:8px 0;
+
+    color:#eee;
+
+    cursor:pointer;
+
+    transition:.2s;
+
+}
+
+.leaflet-control-layers label:hover{
+
+    color:#ff7043;
+
+}
+
+.leaflet-control-layers input{
+
+    accent-color:#ff7043;
+
+}
+
+.leaflet-control-layers i{
+
+    width:20px;
+
+    color:#ff7043;
+
+    text-align:center;
+
+}
+
+/*==================================================
+=                MAP BUTTONS                       =
+==================================================*/
+
+.map-buttons{
+
+    display:flex;
+
+    flex-direction:column;
+
+    gap:8px;
+
+}
+
+.map-buttons button{
+
+    width:42px;
+
+    height:42px;
+
+    border:none;
+
+    border-radius:10px;
+
+    background:#1b1f24;
+
+    color:#fff;
+
+    font-size:20px;
+
+    cursor:pointer;
+
+    transition:.25s;
+
+    box-shadow:0 2px 8px rgba(0,0,0,.35);
+
+}
+
+.map-buttons button:hover,
+.map-buttons button.active{
+
+    background:#ff7043;
+
+}
+
+.map-buttons i{
+
+    pointer-events:none;
+
+}
