@@ -71,8 +71,7 @@ def obter_sismos():
 
 @app.route("/")
 def index():
-    dados = obter_sismos()
-    return render_template("index.html", dados=dados)
+    return render_template("index.html")
 
 
 @app.route("/api/sismos")

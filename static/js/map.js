@@ -1,6 +1,9 @@
 //===================================================
-// MAPA
+// MAPA E DADOS
 //===================================================
+
+const loadingEl = document.getElementById("loading");
+const totalEl = document.getElementById("total-sismos");
 
 const map = L.map("map", {
     zoomControl: false
@@ -10,32 +13,56 @@ L.control.zoom({
     position: "bottomright"
 }).addTo(map);
 
-//===================================================
-// BASEMAPS
-//===================================================
+const basemaps = {
+    dark: L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        {
+            attribution: "© OpenStreetMap © CARTO"
+        }
+    ),
+    osm: L.tileLayer(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        {
+            attribution: "© OpenStreetMap"
+        }
+    )
+};
 
-const dark = L.tileLayer(
-    "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    {
-        attribution: "© OpenStreetMap © CARTO"
+basemaps.dark.addTo(map);
+
+const markersLayer = L.layerGroup().addTo(map);
+const heatLayer = L.heatLayer([], {
+    radius: 50,
+    blur: 25,
+    maxZoom: 13,
+    minOpacity: 0.35,
+    max: 1,
+    gradient: {
+        0.00: "transparent",
+        0.08: "#FFF3C4",
+        0.18: "#FFE082",
+        0.30: "#FFD54F",
+        0.42: "#FFB300",
+        0.54: "#FB8C00",
+        0.66: "#F57C00",
+        0.78: "#EF6C00",
+        0.88: "#F4511E",
+        0.94: "#E53935",
+        0.98: "#C62828",
+        1.00: "#7F0000"
     }
-);
+});
 
-const osm = L.tileLayer(
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {
-        attribution: "© OpenStreetMap"
-    }
-);
-
-dark.addTo(map);
-
-//===================================================
-// CORES
-//===================================================
+const state = {
+    markers: [],
+    heatVisible: false,
+    darkMode: true,
+    refreshTimer: null,
+    hasLoaded: false,
+    firstLoad: true
+};
 
 function corMagnitude(m) {
-
     if (m == null)
         return "#555";
 
@@ -55,75 +82,18 @@ function corMagnitude(m) {
         return "#E53935";
 
     return "#8E0000";
-
 }
 
 function raioMagnitude(m) {
-
     if (m == null)
         return 5;
 
     return 4 + Math.pow(m, 1.5);
-
 }
 
-//===================================================
-// ENERGIA PARA HEATMAP
-//===================================================
-
-const maxMagnitude = Math.max(
-    ...dados.data.map(s => s.magnitude ?? 0)
-);
-
-const heatPoints = [];
-
-const grupoSismos = L.layerGroup();
-
-const markers = [];
-
-const bounds = [];
-
-//===================================================
-// SISMOS
-//===================================================
-
-dados.data.forEach((s, i) => {
-
-    const intensidade = maxMagnitude > 0
-        ? (s.magnitude ?? 0) / maxMagnitude
-        : 0;
-
-    heatPoints.push([
-        s.latitude,
-        s.longitude,
-        intensidade
-    ]);
-
-    bounds.push([
-        s.latitude,
-        s.longitude
-    ]);
-
-    const marker = L.circleMarker(
-        [s.latitude, s.longitude],
-        {
-
-            radius: raioMagnitude(s.magnitude),
-
-            color: "#ffffff",
-
-            weight: 1,
-
-            fillColor: corMagnitude(s.magnitude),
-
-            fillOpacity: .9
-
-        }
-    );
-
-    marker.bindPopup(`
+function criarPopup(s) {
+    return `
 <div class="eq-popup">
-
     <div class="eq-header">
         <div class="eq-mag" style="background:${corMagnitude(s.magnitude)}">
             ${s.magnitude ?? "?"}
@@ -136,265 +106,252 @@ dados.data.forEach((s, i) => {
     </div>
 
     <table class="eq-table">
-
         <tr>
             <td><i class="bi bi-calendar-event"></i></td>
             <td>Data</td>
             <td>${new Date(s.time).toLocaleString("pt-PT")}</td>
         </tr>
-
         <tr>
             <td><i class="bi bi-arrow-down-circle"></i></td>
             <td>Profundidade</td>
-            <td>${s.depth} km</td>
+            <td>${s.depth}</td>
         </tr>
-
         <tr>
             <td><i class="bi bi-geo-alt"></i></td>
             <td>Latitude</td>
             <td>${Number(s.latitude).toFixed(4)}°</td>
         </tr>
-
         <tr>
             <td><i class="bi bi-geo"></i></td>
             <td>Longitude</td>
             <td>${Number(s.longitude).toFixed(4)}°</td>
         </tr>
-
         <tr>
             <td><i class="bi bi-broadcast"></i></td>
             <td>Origem</td>
             <td>${s.source}</td>
         </tr>
-
     </table>
-
-</div>
-`,{
-    maxWidth:320,
-    className:"earthquake-popup"
-});
-
-    marker.addTo(grupoSismos);
-
-    markers.push(marker);
-
-});
-
-//===================================================
-// HEATMAP
-//===================================================
-
-const heat = L.heatLayer(
-    heatPoints,
-    {
-
-        radius: 50,
-
-        blur: 25,
-
-        maxZoom: 13,
-
-        minOpacity: 0.35,
-
-        max: 1,
-
-        gradient: {
-            0.00: "transparent",
-            0.08: "#FFF3C4",
-            0.18: "#FFE082",
-            0.30: "#FFD54F",
-            0.42: "#FFB300",
-            0.54: "#FB8C00",
-            0.66: "#F57C00",
-            0.78: "#EF6C00",
-            0.88: "#F4511E",
-            0.94: "#E53935",
-            0.98: "#C62828",
-            1.00: "#7F0000"
-        }
-
-    }
-);
-
-//===================================================
-// CAMADAS
-//===================================================
-
-grupoSismos.addTo(map);
-
-const MapButtons = L.Control.extend({
-
-    options:{
-        position:"topleft"
-    },
-
-    onAdd:function(){
-
-        const div=L.DomUtil.create("div","map-buttons");
-
-        div.innerHTML=`
-            <button id="basemap-btn" title="Mapa">
-                <i class="bi bi-moon-stars-fill"></i>
-            </button>
-
-            <button id="heat-btn" title="Heatmap">
-                <i class="bi bi-fire"></i>
-            </button>
-        `;
-
-        L.DomEvent.disableClickPropagation(div);
-
-        return div;
-
-    }
-
-});
-
-map.addControl(new MapButtons());
-
-let heatVisible=false;
-
-document.addEventListener("click",(e)=>{
-
-    const btn=e.target.closest("#heat-btn");
-
-    if(!btn) return;
-
-    if(heatVisible){
-
-        map.removeLayer(heat);
-        btn.classList.remove("active");
-
-    }else{
-
-        heat.addTo(map);
-        btn.classList.add("active");
-
-    }
-
-    heatVisible=!heatVisible;
-
-});
-
-let darkMode=false;
-
-document.addEventListener("click",(e)=>{
-
-    const btn=e.target.closest("#basemap-btn");
-
-    if(!btn) return;
-
-    if(darkMode){
-
-        map.removeLayer(dark);
-        osm.addTo(map);
-
-        btn.innerHTML='<i class="bi bi-moon-stars-fill"></i>';
-        btn.classList.remove("active");
-
-    }else{
-
-        map.removeLayer(osm);
-        dark.addTo(map);
-
-        btn.innerHTML='<i class="bi bi-sun-fill"></i>';
-        btn.classList.add("active");
-
-    }
-
-    darkMode=!darkMode;
-
-});
-
-//===================================================
-// LEGENDA
-//===================================================
-
-const legenda = L.control({
-    position: "bottomleft"
-});
-
-legenda.onAdd = function () {
-
-    const div = L.DomUtil.create("div", "legend");
-
-    div.innerHTML = `
-    <div style="background-color: #000; padding: 5px; border-radius: 5px; color: #fff; font-size: 14px;">
-        <div class="legend-title">
-            <i class="bi bi-activity"></i>
-            Magnitude
-        </div>
-
-        <table class="legend-table">
-
-            <tr>
-                <td><i class="bi bi-record-circle-fill" style="color:#4a4a4a"></i></td>
-                <td>&lt; 2.0</td>
-            </tr>
-
-            <tr>
-                <td><i class="bi bi-record-circle-fill" style="color:#7B4B1A"></i></td>
-                <td>2.0 – 2.9</td>
-            </tr>
-
-            <tr>
-                <td><i class="bi bi-record-circle-fill" style="color:#A66A2B"></i></td>
-                <td>3.0 – 3.9</td>
-            </tr>
-
-            <tr>
-                <td><i class="bi bi-record-circle-fill" style="color:#D46A00"></i></td>
-                <td>4.0 – 4.9</td>
-            </tr>
-
-            <tr>
-                <td><i class="bi bi-record-circle-fill" style="color:#E53935"></i></td>
-                <td>5.0 – 5.9</td>
-            </tr>
-
-            <tr>
-                <td><i class="bi bi-record-circle-fill" style="color:#8E0000"></i></td>
-                <td>≥ 6.0</td>
-            </tr>
-
-        </table>
-    </div>
-    `;
-
-    return div;
-};
-
-legenda.addTo(map);
-
-//===================================================
-// AJUSTAR AO CONJUNTO DE DADOS
-//===================================================
-
-if (bounds.length) {
-
-    map.fitBounds(bounds, {
-        padding: [30, 30]
+</div>`;
+}
+
+function atualizarMarcadores(dados) {
+    markersLayer.clearLayers();
+    state.markers = [];
+
+    const maxMagnitude = dados.data.reduce((max, s) => {
+        const magnitude = s.magnitude ?? 0;
+        return magnitude > max ? magnitude : max;
+    }, 0);
+
+    const heatPoints = [];
+    const bounds = [];
+
+    dados.data.forEach((s) => {
+        const intensidade = maxMagnitude > 0
+            ? (s.magnitude ?? 0) / maxMagnitude
+            : 0;
+
+        heatPoints.push([s.latitude, s.longitude, intensidade]);
+        bounds.push([s.latitude, s.longitude]);
+
+        const marker = L.circleMarker([s.latitude, s.longitude], {
+            radius: raioMagnitude(s.magnitude),
+            color: "#ffffff",
+            weight: 1,
+            fillColor: corMagnitude(s.magnitude),
+            fillOpacity: 0.9
+        });
+
+        marker.bindPopup(criarPopup(s), {
+            maxWidth: 320,
+            className: "earthquake-popup"
+        });
+
+        marker.addTo(markersLayer);
+        state.markers.push(marker);
     });
 
+    heatLayer.setLatLngs(heatPoints);
+    heatLayer.redraw();
+
+    if (state.heatVisible) {
+        if (!map.hasLayer(heatLayer)) {
+            heatLayer.addTo(map);
+        }
+    } else if (map.hasLayer(heatLayer)) {
+        map.removeLayer(heatLayer);
+    }
+
+    if (state.firstLoad && bounds.length) {
+
+        map.fitBounds(bounds, {
+            padding: [30, 30]
+        });
+
+        state.firstLoad = false;
+    }
 }
 
-//===================================================
-// TABELA
-//===================================================
+function definirLegenda() {
+    const legenda = L.control({
+        position: "bottomleft"
+    });
+
+    legenda.onAdd = function () {
+        const div = L.DomUtil.create("div", "legend");
+        div.innerHTML = `
+        <div style="background-color: #000; padding: 5px; border-radius: 5px; color: #fff; font-size: 14px;">
+            <div class="legend-title">
+                <i class="bi bi-activity"></i>
+                Magnitude
+            </div>
+            <table class="legend-table">
+                <tr>
+                    <td><i class="bi bi-record-circle-fill" style="color:#4a4a4a"></i></td>
+                    <td>&lt; 2.0</td>
+                </tr>
+                <tr>
+                    <td><i class="bi bi-record-circle-fill" style="color:#7B4B1A"></i></td>
+                    <td>2.0 – 2.9</td>
+                </tr>
+                <tr>
+                    <td><i class="bi bi-record-circle-fill" style="color:#A66A2B"></i></td>
+                    <td>3.0 – 3.9</td>
+                </tr>
+                <tr>
+                    <td><i class="bi bi-record-circle-fill" style="color:#D46A00"></i></td>
+                    <td>4.0 – 4.9</td>
+                </tr>
+                <tr>
+                    <td><i class="bi bi-record-circle-fill" style="color:#E53935"></i></td>
+                    <td>5.0 – 5.9</td>
+                </tr>
+                <tr>
+                    <td><i class="bi bi-record-circle-fill" style="color:#8E0000"></i></td>
+                    <td>≥ 6.0</td>
+                </tr>
+            </table>
+        </div>`;
+        return div;
+    };
+
+    legenda.addTo(map);
+}
+
+function configurarControles() {
+    const MapButtons = L.Control.extend({
+        options: {
+            position: "topleft"
+        },
+        onAdd: function () {
+            const div = L.DomUtil.create("div", "map-buttons");
+            div.innerHTML = `
+                <button id="basemap-btn" title="Mapa">
+                    <i class="bi bi-sun-fill"></i>
+                </button>
+                <button id="heat-btn" title="Heatmap">
+                    <i class="bi bi-fire"></i>
+                </button>`;
+            L.DomEvent.disableClickPropagation(div);
+            return div;
+        }
+    });
+
+    map.addControl(new MapButtons());
+
+    document.addEventListener("click", (e) => {
+        const heatBtn = e.target.closest("#heat-btn");
+        if (heatBtn) {
+            state.heatVisible = !state.heatVisible;
+            heatBtn.classList.toggle("active", state.heatVisible);
+
+            if (state.heatVisible) {
+                heatLayer.addTo(map);
+            } else {
+                map.removeLayer(heatLayer);
+            }
+
+            return;
+        }
+
+        const basemapBtn = e.target.closest("#basemap-btn");
+        if (!basemapBtn) {
+            return;
+        }
+
+        state.darkMode = !state.darkMode;
+        if (state.darkMode) {
+            map.removeLayer(basemaps.osm);
+            basemaps.dark.addTo(map);
+            basemapBtn.innerHTML = '<i class="bi bi-sun-fill"></i>';
+            basemapBtn.classList.add("active");
+        } else {
+            map.removeLayer(basemaps.dark);
+            basemaps.osm.addTo(map);
+            basemapBtn.innerHTML = '<i class="bi bi-moon-stars-fill"></i>';
+            basemapBtn.classList.remove("active");
+        }
+    });
+}
+
+async function carregarSismos() {
+    try {
+        if (!state.hasLoaded) {
+            loadingEl.style.display = "flex";
+        }
+
+        const response = await fetch("/api/sismos", {
+            cache: "no-store"
+        });
+
+        if (!response.ok) {
+            throw new Error("Erro ao obter dados.");
+        }
+
+        const dados = await response.json();
+        totalEl.textContent = dados.total;
+        atualizarMarcadores(dados);
+
+        state.hasLoaded = true;
+        loadingEl.style.display = "none";
+    } catch (error) {
+        console.error(error);
+        if (!state.hasLoaded) {
+            alert("Não foi possível carregar os dados.");
+        }
+    }
+}
+
+function iniciarAtualizacoes() {
+    if (state.refreshTimer) {
+        window.clearInterval(state.refreshTimer);
+    }
+
+    state.refreshTimer = window.setInterval(() => {
+        carregarSismos();
+    }, 60000);
+}
 
 window.zoom = function (i) {
+    const s = state.markers[i]?.getLatLng ? state.markers[i].getLatLng() : null;
 
-    const s = dados.data[i];
+    if (!s) {
+        return;
+    }
 
-    map.flyTo(
-        [s.latitude, s.longitude],
-        9,
-        {
-            duration: 1.2
-        }
-    );
+    map.flyTo([s.lat, s.lng], 9, {
+        duration: 1.2
+    });
 
-    markers[i].openPopup();
+    state.markers[i].openPopup();
+};
 
+function inicializarMapa() {
+    definirLegenda();
+    configurarControles();
+    carregarSismos();
+    iniciarAtualizacoes();
 }
+
+inicializarMapa();

@@ -42,7 +42,7 @@
 
                     <span>Sismos</span>
 
-                    <strong>{{ dados.total }}</strong>
+                    <strong id="total-sismos">0</strong>
 
                 </div>
 
@@ -89,6 +89,15 @@
     </nav>
 
     <div id="sidebar-overlay"></div>
+
+    <div id="loading">
+
+        <div class="spinner"></div>
+
+        <p>A carregar sismos...</p>
+
+    </div>
+    
     <div id="container">
 
         <div id="map"></div>
@@ -169,9 +178,7 @@
 
         atualizarBotao();
     </script>
-    <script>
-        const dados = {{ dados| tojson }};
-    </script>
+
     <script src="{{ url_for('static', filename='js/leaflet-heat.js') }}"></script>
 
     <script src="{{ url_for('static', filename='js/map.js') }}"></script>
