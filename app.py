@@ -11,6 +11,10 @@ from datetime import datetime
 import os
 import threading
 import time
+from dotenv import load_dotenv
+
+load_dotenv()
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
 
 app = Flask(__name__)
 
@@ -175,6 +179,33 @@ def generate_final_image(sismo_data):
     print("Imagem gerada: assets/SISMO_TWEET.png")
 
 
+def enviar_discord(sismo):
+
+    if not DISCORD_WEBHOOK:
+        print("Webhook do Discord não configurado.")
+        return
+
+    mensagem = (
+        f"🌍 **Novo sismo registado**\n\n"
+        f"📍 **Local:** {sismo['location']}\n"
+        f"📈 **Magnitude:** {sismo['scale']}\n"
+        f"🕒 **Data:** {sismo['date']}"
+    )
+
+    with open("assets/SISMO_TWEET.png", "rb") as imagem:
+
+        requests.post(
+            DISCORD_WEBHOOK,
+            data={
+                "content": mensagem
+            },
+            files={
+                "file": ("SISMO.png", imagem, "image/png")
+            },
+            timeout=30
+        )
+
+
 def monitor_sismos():
 
     global ultimo_sismo
@@ -200,6 +231,8 @@ def monitor_sismos():
                 print("Novo sismo encontrado!")
 
                 generate_final_image(sismo)
+
+                enviar_discord(sismo)
 
                 ultimo_sismo = identificador
 
