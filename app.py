@@ -20,7 +20,7 @@ app = Flask(__name__)
 
 URL = "https://www.ipma.pt/pt/geofisica/sismicidade/"
 
-ultimo_sismo = None
+sismos_enviados = set()
 
 
 def overlay_text(img, text, position, font, color):
@@ -239,44 +239,68 @@ def enviar_discord(sismo, tentativas=5):
 
 def monitor_sismos():
 
-    global ultimo_sismo
+    global sismos_enviados
 
     print("Monitor de sismos iniciado.")
-
-    primeiro = get_latest_sismo()
-
-    if primeiro:
-        ultimo_sismo = primeiro["id"]
-        print("Último sismo conhecido:", ultimo_sismo)
 
     while True:
 
         try:
 
-            sismo = get_latest_sismo()
+            data = obter_sismos()
 
-            if sismo is None:
-                print("Nenhum sismo encontrado.")
+            if not data["data"]:
                 time.sleep(60)
                 continue
 
-            print("Último do IPMA:", sismo["id"])
+            novos = []
 
-            if sismo["id"] != ultimo_sismo:
+            # Procurar TODOS os sismos ainda não enviados
+            for s in data["data"]:
 
-                print("Novo sismo detetado!")
+                if s["time"] not in sismos_enviados:
+
+                    novos.append(s)
+
+            if not novos:
+
+                print("Sem novos sismos.")
+                time.sleep(60)
+                continue
+
+            # enviar do mais antigo para o mais recente
+            novos.sort(key=lambda x: x["datetime"])
+
+            print(f"Foram encontrados {len(novos)} novos sismos.")
+
+            for s in novos:
+
+                sismo = {
+                    "id": s["time"],
+                    "location": s["obsRegion"] or s["areaID"] or "Portugal",
+                    "scale": s["magnitude"] or 0.0,
+                    "date": s["datetime"].strftime("%d-%m-%Y pelas %H:%M (hora local)"),
+                    "intensity": "Sem info a esta hora",
+                    "latitude": s["latitude"],
+                    "longitude": s["longitude"]
+                }
+
+                print(
+                    f"Enviar {sismo['location']} "
+                    f"{sismo['scale']} "
+                    f"{sismo['id']}"
+                )
 
                 generate_final_image(sismo)
 
                 if enviar_discord(sismo):
-                    ultimo_sismo = sismo["id"]
-                else:
-                    print("O sismo será tentado novamente na próxima verificação.")
 
-            else:
-                print("Sem novos sismos.")
+                    sismos_enviados.add(s["time"])
+
+                    time.sleep(2)
 
         except Exception as e:
+
             print("Erro:", e)
 
         time.sleep(60)
@@ -414,7 +438,16 @@ def download_image():
 
 
 if __name__ == "__main__":
+
     os.makedirs("assets", exist_ok=True)
+
+    data = obter_sismos()
+
+    for s in data["data"]:
+        sismos_enviados.add(s["time"])
+
+    print(f"{len(sismos_enviados)} sismos existentes ignorados.")
+
     threading.Thread(
         target=monitor_sismos,
         daemon=True
