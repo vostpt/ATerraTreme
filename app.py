@@ -174,41 +174,80 @@ def generate_final_image(sismo_data):
 
     img_final.paste(img, (0, 0))
     img_final.paste(img_map, (1080, 0))
+    if os.path.exists("assets/SISMO_TWEET.png"):
+        os.remove("assets/SISMO_TWEET.png")
     img_final.save("assets/SISMO_TWEET.png")
 
     print("Imagem gerada: assets/SISMO_TWEET.png")
 
 
-def enviar_discord(sismo):
+def enviar_discord(sismo, tentativas=5):
 
     if not DISCORD_WEBHOOK:
-        print("Webhook do Discord não configurado.")
-        return
+        print("Webhook não configurado.")
+        return False
 
     mensagem = (
         f"🌍 **Novo sismo registado**\n\n"
-        f"📍 **Local:** {sismo['location']}\n"
-        f"📈 **Magnitude:** {sismo['scale']}\n"
-        f"🕒 **Data:** {sismo['date']}"
+        f"📍 Local: {sismo['location']}\n"
+        f"📈 Magnitude: {sismo['scale']}\n"
+        f"🕒 {sismo['date']}"
     )
 
-    with open("assets/SISMO_TWEET.png", "rb") as imagem:
+    for tentativa in range(1, tentativas + 1):
 
-        requests.post(
-            DISCORD_WEBHOOK,
-            data={
-                "content": mensagem
-            },
-            files={
-                "file": ("SISMO.png", imagem, "image/png")
-            },
-            timeout=30
-        )
+        try:
+
+            with open("assets/SISMO_TWEET.png", "rb") as imagem:
+
+                r = requests.post(
+                    DISCORD_WEBHOOK,
+                    data={"content": mensagem},
+                    files={
+                        "file": (
+                            "SISMO.png",
+                            imagem,
+                            "image/png"
+                        )
+                    },
+                    timeout=30
+                )
+
+            if r.status_code in (200, 204):
+                print(f"Discord: enviado à {tentativa}ª tentativa.")
+                return True
+
+            print(
+                f"Discord respondeu {r.status_code} "
+                f"(tentativa {tentativa}/{tentativas})"
+            )
+
+            print(r.text)
+
+        except Exception as e:
+
+            print(
+                f"Erro ao enviar para o Discord "
+                f"(tentativa {tentativa}/{tentativas}): {e}"
+            )
+
+        time.sleep(5)
+
+    print("Falha ao enviar para o Discord após várias tentativas.")
+    return False
 
 
 def monitor_sismos():
 
     global ultimo_sismo
+
+    print("Monitor de sismos iniciado.")
+
+    primeiro = get_latest_sismo()
+
+    if primeiro:
+        ultimo_sismo = primeiro["id"]
+        print("Último sismo conhecido:", ultimo_sismo)
 
     while True:
 
@@ -217,24 +256,22 @@ def monitor_sismos():
             sismo = get_latest_sismo()
 
             if sismo is None:
+                print("Nenhum sismo encontrado.")
                 time.sleep(60)
                 continue
 
-            identificador = (
-                sismo["date"],
-                sismo["location"],
-                sismo["scale"]
-            )
+            print("Último do IPMA:", sismo["id"])
 
-            if identificador != ultimo_sismo:
+            if sismo["id"] != ultimo_sismo:
 
-                print("Novo sismo encontrado!")
+                print("Novo sismo detetado!")
 
                 generate_final_image(sismo)
 
-                enviar_discord(sismo)
-
-                ultimo_sismo = identificador
+                if enviar_discord(sismo):
+                    ultimo_sismo = sismo["id"]
+                else:
+                    print("O sismo será tentado novamente na próxima verificação.")
 
             else:
                 print("Sem novos sismos.")
@@ -286,8 +323,26 @@ def obter_sismos():
         })
 
     # Ordenar por data (mais recente primeiro)
+    for s in sismos:
+
+        try:
+            s["datetime"] = datetime.fromisoformat(
+                s["time"].replace("Z", "")
+            )
+        except ValueError:
+            try:
+                s["datetime"] = datetime.strptime(
+                    s["time"],
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            except ValueError:
+                s["datetime"] = datetime.strptime(
+                    s["time"],
+                    "%Y-%m-%dT%H:%M:%S"
+                )
+
     sismos.sort(
-        key=lambda x: datetime.strptime(x["time"], "%Y-%m-%dT%H:%M:%S"),
+        key=lambda x: x["datetime"],
         reverse=True
     )
 
@@ -305,13 +360,14 @@ def get_latest_sismo():
         return None
 
     s = data["data"][0]
-    try:
-        dt = datetime.strptime(s["time"], "%Y-%m-%d %H:%M:%S")
-        data_formatada = dt.strftime("%d-%m-%Y pelas %H:%M (hora local)")
-    except:
-        data_formatada = s["time"]
+    dt = s["datetime"]
+
+    data_formatada = dt.strftime(
+        "%d-%m-%Y pelas %H:%M (hora local)"
+    )
 
     return {
+        "id": s["time"],
         "location": s["obsRegion"] or s["areaID"] or "Portugal",
         "scale": s["magnitude"] or 0.0,
         "date": data_formatada,
@@ -363,4 +419,10 @@ if __name__ == "__main__":
         target=monitor_sismos,
         daemon=True
     ).start()
-    app.run(host="0.0.0.0", port=9076, debug=True)
+
+    app.run(
+        host="0.0.0.0",
+        port=9076,
+        debug=False,
+        use_reloader=False
+    )
