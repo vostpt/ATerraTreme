@@ -56,6 +56,7 @@ const heatLayer = L.heatLayer([], {
 
 const state = {
     markers: [],
+    earthquakes: [],
     heatVisible: false,
     darkMode: true,
     refreshTimer: null,
@@ -139,6 +140,7 @@ function criarPopup(s) {
 function atualizarMarcadores(dados) {
     markersLayer.clearLayers();
     state.markers = [];
+    state.earthquakes = [];
 
     const maxMagnitude = dados.data.reduce((max, s) => {
         const magnitude = s.magnitude ?? 0;
@@ -170,7 +172,27 @@ function atualizarMarcadores(dados) {
         });
 
         marker.addTo(markersLayer);
+
+        const hitArea = L.circleMarker([s.latitude, s.longitude], {
+            radius: Math.max(raioMagnitude(s.magnitude), 18),
+            stroke: false,
+            fill: true,
+            fillColor: "#ffffff",
+            fillOpacity: 0.01
+        });
+
+        hitArea.on("click", () => {
+            marker.openPopup();
+        });
+
+        hitArea.addTo(markersLayer);
+
+
         state.markers.push(marker);
+        state.earthquakes.push({
+            marker,
+            latlng: L.latLng(s.latitude, s.longitude)
+        });
     });
 
     heatLayer.setLatLngs(heatPoints);
@@ -192,6 +214,37 @@ function atualizarMarcadores(dados) {
 
         state.firstLoad = false;
     }
+}
+
+function selecionarSismoMaisProximo(e) {
+
+    let maisProximo = null;
+    let menorDistancia = Infinity;
+
+    const pontoClique = map.latLngToContainerPoint(e.latlng);
+
+    state.earthquakes.forEach(eq => {
+
+        const pontoSismo = map.latLngToContainerPoint(eq.latlng);
+
+        const distancia = pontoClique.distanceTo(pontoSismo);
+
+        if (distancia < menorDistancia) {
+            menorDistancia = distancia;
+            maisProximo = eq;
+        }
+
+    });
+
+    // raio de seleção em pixels
+    const tolerancia = window.innerWidth < 768 ? 35 : 20;
+
+    if (maisProximo && menorDistancia <= tolerancia) {
+
+        maisProximo.marker.openPopup();
+
+    }
+
 }
 
 function definirLegenda() {
@@ -353,6 +406,7 @@ function inicializarMapa() {
     configurarControles();
     carregarSismos();
     iniciarAtualizacoes();
+    map.on("click", selecionarSismoMaisProximo);
 }
 
 inicializarMapa();
