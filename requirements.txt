@@ -1,0 +1,6 @@
+pandas
+Pillow
+matplotlib
+contextily
+shapely
+geopandas
