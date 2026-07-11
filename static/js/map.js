@@ -6,6 +6,10 @@ const loadingEl = document.getElementById("loading");
 const totalEl = document.getElementById("total-sismos");
 
 const map = L.map("map", {
+    center: [39.6945, -8.1306],
+    zoom: 4,
+    minZoom: 2,
+    maxZoom: 13,
     zoomControl: false,
     tap: true
 });
@@ -158,13 +162,38 @@ function atualizarMarcadores(dados) {
         heatPoints.push([s.latitude, s.longitude, intensidade]);
         bounds.push([s.latitude, s.longitude]);
 
+        const recente = ultimas24h(s.time);
+
         const marker = L.circleMarker([s.latitude, s.longitude], {
             radius: raioMagnitude(s.magnitude),
+
             color: "#ffffff",
-            weight: 1,
+            weight: recente ? 3 : 1,
+
             fillColor: corMagnitude(s.magnitude),
-            fillOpacity: 0.9
+            fillOpacity: recente ? 1 : 0.9,
+
+            className: recente ? "earthquake-recent" : ""
         });
+
+        if (recente) {
+
+            const tamanho = (raioMagnitude(s.magnitude) + 8) * 2;
+
+            const halo = L.marker([s.latitude, s.longitude], {
+                interactive: false,
+                zIndexOffset: -1000,
+                icon: L.divIcon({
+                    className: "pulse-marker",
+                    html: `<div class="pulse" style="width:${tamanho}px;height:${tamanho}px"></div>`,
+                    iconSize: [tamanho, tamanho],
+                    iconAnchor: [tamanho / 2, tamanho / 2]
+                })
+            });
+
+            halo.addTo(markersLayer);
+
+        }
 
         marker.bindPopup(criarPopup(s), {
             maxWidth: 320,
@@ -207,11 +236,6 @@ function atualizarMarcadores(dados) {
     }
 
     if (state.firstLoad && bounds.length) {
-
-        map.fitBounds(bounds, {
-            padding: [30, 30]
-        });
-
         state.firstLoad = false;
     }
 }
@@ -400,6 +424,15 @@ window.zoom = function (i) {
 
     state.markers[i].openPopup();
 };
+
+function ultimas24h(dataHora) {
+
+    const agora = Date.now();
+    const data = new Date(dataHora).getTime();
+
+    return (agora - data) <= 24 * 60 * 60 * 1000;
+
+}
 
 function inicializarMapa() {
     definirLegenda();
