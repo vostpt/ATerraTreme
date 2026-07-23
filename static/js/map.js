@@ -7,7 +7,7 @@ const totalEl = document.getElementById("total-sismos");
 
 const map = L.map("map", {
     center: [39.6945, -8.1306],
-    zoom: 4,
+    zoom: 5,
     minZoom: 2,
     maxZoom: 13,
     zoomControl: false,
