@@ -1,11 +1,9 @@
 from flask import Flask, jsonify, render_template, send_file
 import requests
-import json
 import pandas as pd
 from PIL import Image, ImageFont, ImageDraw
 import matplotlib.pyplot as plt
 import contextily as ctx
-from shapely.geometry import Point
 import geopandas as gpd
 from datetime import datetime
 import os
@@ -18,7 +16,9 @@ DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
 
 app = Flask(__name__)
 
-URL = "https://www.ipma.pt/pt/geofisica/sismicidade/"
+# APIs IPMA
+API_CONTINENTE = "https://api.ipma.pt/open-data/observation/seismic/7.json"
+API_ACORES = "https://api.ipma.pt/open-data/observation/seismic/3.json"
 
 sismos_enviados = set()
 
@@ -42,114 +42,47 @@ def parse_intensity(intensity_list):
 
 
 def create_map_image(df):
-
     latest = df.iloc[-1]
 
-    # ----------------------------
-    # Criar GeoDataFrame
-    # ----------------------------
     gdf = gpd.GeoDataFrame(
         df,
-        geometry=gpd.points_from_xy(
-            df.longitude,
-            df.latitude
-        ),
+        geometry=gpd.points_from_xy(df.longitude, df.latitude),
         crs="EPSG:4326"
     ).to_crs(epsg=3857)
 
     latest_point = gdf.iloc[-1]
-
-    # Centro do mapa (epicentro)
     cx = latest_point.geometry.x
     cy = latest_point.geometry.y
-
-    # Janela visível (175 km para cada lado)
     window = 175_000
 
     fig = plt.figure(figsize=(6, 6), dpi=180)
     ax = fig.add_axes([0, 0, 1, 1])
 
-    # Centrar exatamente no epicentro
     ax.set_xlim(cx - window, cx + window)
     ax.set_ylim(cy - window, cy + window)
     ax.set_aspect("equal")
 
-    # Mapa de fundo
-    ctx.add_basemap(
-        ax,
-        source=ctx.providers.OpenStreetMap.Mapnik,
-        attribution=False
-    )
+    ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik, attribution=False)
 
-    # Halo exterior
-    ax.scatter(
-        cx,
-        cy,
-        s=7000,
-        color="red",
-        alpha=0.10,
-        zorder=2
-    )
+    # Halos e epicentro
+    ax.scatter(cx, cy, s=7000, color="red", alpha=0.10, zorder=2)
+    ax.scatter(cx, cy, s=2500, color="red", alpha=0.25, zorder=3)
+    ax.scatter(cx, cy, s=350, marker="*", color="darkred", edgecolors="white", linewidth=1.5, zorder=4)
 
-    # Halo interior
-    ax.scatter(
-        cx,
-        cy,
-        s=2500,
-        color="red",
-        alpha=0.25,
-        zorder=3
-    )
-
-    # Epicentro
-    ax.scatter(
-        cx,
-        cy,
-        s=350,
-        marker="*",
-        color="darkred",
-        edgecolors="white",
-        linewidth=1.5,
-        zorder=4
-    )
-
-    # Magnitude
     ax.text(
-        cx,
-        cy + 25000,
-        f"M {latest['scale']:.1f}",
-        fontsize=18,
-        fontweight="bold",
-        ha="center",
-        va="bottom",
+        cx, cy + 25000, f"M {latest['scale']:.1f}",
+        fontsize=18, fontweight="bold", ha="center", va="bottom",
         color="black",
-        bbox=dict(
-            facecolor="white",
-            edgecolor="black",
-            alpha=0.9,
-            boxstyle="round,pad=0.3"
-        ),
+        bbox=dict(facecolor="white", edgecolor="black", alpha=0.9, boxstyle="round,pad=0.3"),
         zorder=5
     )
 
     ax.set_axis_off()
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
-    # Remover margens
-    fig.subplots_adjust(
-        left=0,
-        right=1,
-        bottom=0,
-        top=1
-    )
-
-    plt.savefig(
-        "assets/MAPA_SISMO.png",
-        dpi=180,
-        facecolor="white",
-        pad_inches=0
-    )
-
+    plt.savefig("assets/MAPA_SISMO.png", dpi=180, facecolor="white", pad_inches=0)
     plt.close(fig)
+
 
 def generate_final_image(sismo_data):
     if isinstance(sismo_data, dict):
@@ -174,15 +107,15 @@ def generate_final_image(sismo_data):
 
     img_final.paste(img, (0, 0))
     img_final.paste(img_map, (1080, 0))
+
     if os.path.exists("assets/SISMO_TWEET.png"):
         os.remove("assets/SISMO_TWEET.png")
+    
     img_final.save("assets/SISMO_TWEET.png")
-
     print("Imagem gerada: assets/SISMO_TWEET.png")
 
 
 def enviar_discord(sismo, tentativas=5):
-
     if not DISCORD_WEBHOOK:
         print("Webhook não configurado.")
         return False
@@ -195,21 +128,12 @@ def enviar_discord(sismo, tentativas=5):
     )
 
     for tentativa in range(1, tentativas + 1):
-
         try:
-
             with open("assets/SISMO_TWEET.png", "rb") as imagem:
-
                 r = requests.post(
                     DISCORD_WEBHOOK,
                     data={"content": mensagem},
-                    files={
-                        "file": (
-                            "SISMO.png",
-                            imagem,
-                            "image/png"
-                        )
-                    },
+                    files={"file": ("SISMO.png", imagem, "image/png")},
                     timeout=30
                 )
 
@@ -217,164 +141,68 @@ def enviar_discord(sismo, tentativas=5):
                 print(f"Discord: enviado à {tentativa}ª tentativa.")
                 return True
 
-            print(
-                f"Discord respondeu {r.status_code} "
-                f"(tentativa {tentativa}/{tentativas})"
-            )
-
-            print(r.text)
-
+            print(f"Discord respondeu {r.status_code} (tentativa {tentativa})")
         except Exception as e:
-
-            print(
-                f"Erro ao enviar para o Discord "
-                f"(tentativa {tentativa}/{tentativas}): {e}"
-            )
+            print(f"Erro ao enviar para o Discord: {e}")
 
         time.sleep(5)
 
-    print("Falha ao enviar para o Discord após várias tentativas.")
     return False
 
 
-def monitor_sismos():
-
-    global sismos_enviados
-
-    print("Monitor de sismos iniciado.")
-
-    while True:
-
-        try:
-
-            data = obter_sismos()
-
-            if not data["data"]:
-                time.sleep(60)
-                continue
-
-            novos = []
-
-            # Procurar TODOS os sismos ainda não enviados
-            for s in data["data"]:
-
-                if s["time"] not in sismos_enviados:
-
-                    novos.append(s)
-
-            if not novos:
-
-                print("Sem novos sismos.")
-                time.sleep(60)
-                continue
-
-            # enviar do mais antigo para o mais recente
-            novos.sort(key=lambda x: x["datetime"])
-
-            print(f"Foram encontrados {len(novos)} novos sismos.")
-
-            for s in novos:
-
-                sismo = {
-                    "id": s["time"],
-                    "location": s["obsRegion"] or s["areaID"] or "Portugal",
-                    "scale": s["magnitude"] or 0.0,
-                    "date": s["datetime"].strftime("%d-%m-%Y pelas %H:%M (hora local)"),
-                    "intensity": "Sem info a esta hora",
-                    "latitude": s["latitude"],
-                    "longitude": s["longitude"]
-                }
-
-                print(
-                    f"Enviar {sismo['location']} "
-                    f"{sismo['scale']} "
-                    f"{sismo['id']}"
-                )
-
-                generate_final_image(sismo)
-
-                if enviar_discord(sismo):
-
-                    sismos_enviados.add(s["time"])
-
-                    time.sleep(2)
-
-        except Exception as e:
-
-            print("Erro:", e)
-
-        time.sleep(60)
-
 def obter_sismos():
     headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(URL, headers=headers, timeout=30)
-    response.raise_for_status()
-
-    html = response.text
-    marker = "var seismicdata_world ="
-    pos = html.find(marker)
-    if pos == -1:
-        raise Exception("Dados sísmicos não encontrados.")
-
-    inicio = html.find("{", pos)
-    nivel = 0
-    fim = None
-    for i in range(inicio, len(html)):
-        if html[i] == "{": nivel += 1
-        elif html[i] == "}":
-            nivel -= 1
-            if nivel == 0:
-                fim = i + 1
-                break
-
-    dados = json.loads(html[inicio:fim])
-
     sismos = []
-    for s in dados["data"]:
-        mag = float(s["magnitud"])
-        if mag == -99.0:
-            mag = None
 
-        sismos.append({
-            "areaID": s["areaID"],
-            "obsRegion": s["obsRegion"],
-            "magnitude": mag,
-            "depth": s["depth"],
-            "latitude": float(s["lat"]),
-            "longitude": float(s["lon"]),
-            "time": s["time"],
-            "source": s["source"]
-        })
-
-    # Ordenar por data (mais recente primeiro)
-    for s in sismos:
-
+    for url, regiao in [(API_CONTINENTE, "Continente e Madeira"), (API_ACORES, "Açores")]:
         try:
-            s["datetime"] = datetime.fromisoformat(
-                s["time"].replace("Z", "")
-            )
-        except ValueError:
-            try:
-                s["datetime"] = datetime.strptime(
-                    s["time"],
-                    "%Y-%m-%d %H:%M:%S"
-                )
-            except ValueError:
-                s["datetime"] = datetime.strptime(
-                    s["time"],
-                    "%Y-%m-%dT%H:%M:%S"
-                )
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            dados = response.json()
 
-    sismos.sort(
-        key=lambda x: x["datetime"],
-        reverse=True
-    )
+            for s in dados.get("data", []):
+                mag_str = s.get("magnitud", "-99.0")
+                try:
+                    mag = float(mag_str)
+                    if mag == -99.0 or mag < 0:
+                        mag = None
+                except (ValueError, TypeError):
+                    mag = None
+
+                sismos.append({
+                    "areaID": dados.get("idArea"),
+                    "obsRegion": s.get("obsRegion") or s.get("regionName"),
+                    "magnitude": mag,
+                    "depth": s.get("depth"),
+                    "latitude": float(s.get("lat") or s.get("latitude") or 0),
+                    "longitude": float(s.get("lon") or s.get("longitude") or 0),
+                    "time": s.get("time"),
+                    "source": s.get("source", "IPMA"),
+                })
+        except Exception as e:
+            print(f"Erro ao buscar API {regiao}: {e}")
+
+    # Converter time para datetime
+    for s in sismos:
+        try:
+            time_str = s["time"].replace("Z", "+00:00")
+            s["datetime"] = datetime.fromisoformat(time_str)
+        except:
+            try:
+                s["datetime"] = datetime.fromisoformat(s["time"])
+            except:
+                try:
+                    s["datetime"] = datetime.strptime(s["time"], "%Y-%m-%d %H:%M:%S")
+                except:
+                    s["datetime"] = datetime.now()
+
+    sismos.sort(key=lambda x: x["datetime"], reverse=True)
 
     return {
-        "owner": dados["owner"],
-        "country": dados["country"],
+        "owner": "IPMA",
+        "country": "PT",
         "total": len(sismos),
-        "data": sismos
+        "data": sismos,
     }
 
 
@@ -384,21 +212,65 @@ def get_latest_sismo():
         return None
 
     s = data["data"][0]
-    dt = s["datetime"]
-
-    data_formatada = dt.strftime(
-        "%d-%m-%Y pelas %H:%M (hora local)"
-    )
+    data_formatada = s["datetime"].strftime("%d-%m-%Y pelas %H:%M (hora local)")
 
     return {
         "id": s["time"],
-        "location": s["obsRegion"] or s["areaID"] or "Portugal",
+        "location": s.get("obsRegion") or "Portugal",
         "scale": s["magnitude"] or 0.0,
         "date": data_formatada,
         "intensity": "Sem info a esta hora",
         "latitude": s["latitude"],
         "longitude": s["longitude"]
     }
+
+
+def monitor_sismos():
+    global sismos_enviados
+    print("Monitor de sismos iniciado.")
+
+    while True:
+        try:
+            data = obter_sismos()
+
+            if not data["data"]:
+                time.sleep(60)
+                continue
+
+            novos = [s for s in data["data"] if s["time"] not in sismos_enviados]
+
+            if not novos:
+                # print("Sem novos sismos.")
+                time.sleep(60)
+                continue
+
+            novos.sort(key=lambda x: x["datetime"])
+
+            print(f"Foram encontrados {len(novos)} novos sismos.")
+
+            for s in novos:
+                sismo = {
+                    "id": s["time"],
+                    "location": s.get("obsRegion") or "Portugal",
+                    "scale": s["magnitude"] or 0.0,
+                    "date": s["datetime"].strftime("%d-%m-%Y pelas %H:%M (hora local)"),
+                    "intensity": "Sem info a esta hora",
+                    "latitude": s["latitude"],
+                    "longitude": s["longitude"]
+                }
+
+                print(f"Enviar {sismo['location']} M{sismo['scale']} {sismo['id']}")
+
+                generate_final_image(sismo)
+
+                if enviar_discord(sismo):
+                    sismos_enviados.add(s["time"])
+                    time.sleep(2)
+
+        except Exception as e:
+            print("Erro no monitor:", e)
+
+        time.sleep(60)
 
 
 @app.route("/")
@@ -411,24 +283,6 @@ def api_sismos():
     return jsonify(obter_sismos())
 
 
-@app.route("/api/gerar_imagem")
-def gerar_imagem():
-    try:
-        sismo = get_latest_sismo()
-        if not sismo:
-            return jsonify({"error": "Nenhum sismo encontrado"}), 404
-
-        generate_final_image(sismo)
-
-        return jsonify({
-            "status": "success",
-            "message": "Imagem gerada com sucesso!",
-            "url": "/assets/SISMO_TWEET.png"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/assets/SISMO_TWEET.png")
 def download_image():
     path = "assets/SISMO_TWEET.png"
@@ -438,24 +292,14 @@ def download_image():
 
 
 if __name__ == "__main__":
-
     os.makedirs("assets", exist_ok=True)
 
     data = obter_sismos()
-
     for s in data["data"]:
         sismos_enviados.add(s["time"])
 
     print(f"{len(sismos_enviados)} sismos existentes ignorados.")
 
-    threading.Thread(
-        target=monitor_sismos,
-        daemon=True
-    ).start()
+    threading.Thread(target=monitor_sismos, daemon=True).start()
 
-    app.run(
-        host="0.0.0.0",
-        port=9076,
-        debug=False,
-        use_reloader=False
-    )
+    app.run(host="0.0.0.0", port=9076, debug=False, use_reloader=False)
