@@ -2,13 +2,18 @@ from flask import Flask, jsonify, render_template, send_file
 import requests
 import pandas as pd
 from PIL import Image, ImageFont, ImageDraw
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import contextily as ctx
 import geopandas as gpd
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import threading
 import time
+import io
+import gc
+from collections import deque
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,7 +25,17 @@ app = Flask(__name__)
 API_CONTINENTE = "https://api.ipma.pt/open-data/observation/seismic/7.json"
 API_ACORES = "https://api.ipma.pt/open-data/observation/seismic/3.json"
 
+# Limitar tamanho do histórico
+MAX_SENT = 5000
 sismos_enviados = set()
+_sismos_order = deque(maxlen=MAX_SENT)  # para limpeza FIFO
+
+# Session reutilizável
+session = requests.Session()
+session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; SismoBot/2.0)"})
+
+# Lock para evitar geração simultânea de imagens
+image_lock = threading.Lock()
 
 
 def overlay_text(img, text, position, font, color):
@@ -28,20 +43,8 @@ def overlay_text(img, text, position, font, color):
     draw.text(position, text, font=font, fill=color)
 
 
-def parse_intensity(intensity_list):
-    roman = {'I':1,'II':2,'III':3,'IV':4,'V':5,'VI':6,'VII':7,'VIII':8,'IX':9,'X':10}
-    result = []
-    for intensity in intensity_list:
-        if '/' in intensity:
-            parts = intensity.split('/')
-            values = [roman.get(p.strip().upper(), 1) for p in parts]
-            result.append(sum(values) / 2)
-        else:
-            result.append(roman.get(intensity.strip().upper(), 1))
-    return result
-
-
-def create_map_image(df):
+def create_map_image(df) -> Image.Image:
+    """Gera o mapa em memória e devolve um PIL.Image (sem gravar em disco)."""
     latest = df.iloc[-1]
 
     gdf = gpd.GeoDataFrame(
@@ -62,7 +65,10 @@ def create_map_image(df):
     ax.set_ylim(cy - window, cy + window)
     ax.set_aspect("equal")
 
-    ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik, attribution=False)
+    try:
+        ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik, attribution=False)
+    except Exception as e:
+        print(f"Aviso basemap: {e}")
 
     # Halos e epicentro
     ax.scatter(cx, cy, s=7000, color="red", alpha=0.10, zorder=2)
@@ -71,7 +77,7 @@ def create_map_image(df):
 
     ax.text(
         cx, cy + 25000, f"M {latest['scale']:.1f}",
-        fontsize=18, fontweight="bold", ha="center", va="bottom",
+        fontsize=16, fontweight="bold", ha="center", va="bottom",
         color="black",
         bbox=dict(facecolor="white", edgecolor="black", alpha=0.9, boxstyle="round,pad=0.3"),
         zorder=5
@@ -80,42 +86,59 @@ def create_map_image(df):
     ax.set_axis_off()
     fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
-    plt.savefig("assets/MAPA_SISMO.png", dpi=180, facecolor="white", pad_inches=0)
-    plt.close(fig)
+    # Guardar diretamente em memória
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=180, facecolor="white", pad_inches=0)
+    plt.close(fig)          # fecha a figura
+    plt.close('all')        # segurança extra
+    buf.seek(0)
+
+    img = Image.open(buf).convert("RGB")
+    buf.close()
+    return img
 
 
-def generate_final_image(sismo_data):
-    if isinstance(sismo_data, dict):
-        df = pd.DataFrame([sismo_data])
-    else:
-        df = pd.DataFrame(sismo_data)
+def generate_final_image(sismo_data) -> bytes:
+    """Gera a imagem final completa e devolve os bytes."""
+    with image_lock:
+        if isinstance(sismo_data, dict):
+            df = pd.DataFrame([sismo_data])
+        else:
+            df = pd.DataFrame(sismo_data)
 
-    create_map_image(df)
+        map_img = create_map_image(df)
 
-    img = Image.open("assets/SISMO_TEMPLATE_AUTO.png")
-    font = ImageFont.truetype("assets/Lato-Bold.ttf", 38)
+        template = Image.open("assets/SISMO_TEMPLATE_AUTO.png").convert("RGB")
+        font = ImageFont.truetype("assets/Lato-Bold.ttf", 38)
 
-    latest = df.iloc[-1]
+        latest = df.iloc[-1]
 
-    overlay_text(img, str(latest['location']).upper(), (390, 559), font, "#703D25")
-    overlay_text(img, str(latest['scale']), (455, 629), font, "#703D25")
-    overlay_text(img, str(latest['date']), (242, 772), font, "#00A396")
-    overlay_text(img, str(latest['intensity']), (520, 832), font, "#703D25")
+        overlay_text(template, str(latest['location']).upper(), (390, 559), font, "#703D25")
+        overlay_text(template, str(latest['scale']), (455, 629), font, "#703D25")
+        overlay_text(template, str(latest['date']), (242, 772), font, "#00A396")
+        overlay_text(template, str(latest['intensity']), (520, 832), font, "#703D25")
 
-    img_final = Image.new("RGB", (2160, 1080), color="white")
-    img_map = Image.open("assets/MAPA_SISMO.png")
+        final = Image.new("RGB", (2160, 1080), color="white")
+        final.paste(template, (0, 0))
+        final.paste(map_img, (1080, 0))
 
-    img_final.paste(img, (0, 0))
-    img_final.paste(img_map, (1080, 0))
+        final.save("assets/SISMO_TWEET.png", optimize=True)
 
-    if os.path.exists("assets/SISMO_TWEET.png"):
-        os.remove("assets/SISMO_TWEET.png")
-    
-    img_final.save("assets/SISMO_TWEET.png")
-    print("Imagem gerada: assets/SISMO_TWEET.png")
+        # Bytes para envio imediato
+        buf = io.BytesIO()
+        final.save(buf, format="PNG", optimize=True)
+        buf.seek(0)
+        data = buf.getvalue()
+        buf.close()
+
+        # Limpeza
+        del map_img, template, final, df
+        gc.collect()
+
+        return data
 
 
-def enviar_discord(sismo, tentativas=5):
+def enviar_discord(sismo, image_bytes: bytes, tentativas=4):
     if not DISCORD_WEBHOOK:
         print("Webhook não configurado.")
         return False
@@ -129,13 +152,13 @@ def enviar_discord(sismo, tentativas=5):
 
     for tentativa in range(1, tentativas + 1):
         try:
-            with open("assets/SISMO_TWEET.png", "rb") as imagem:
-                r = requests.post(
-                    DISCORD_WEBHOOK,
-                    data={"content": mensagem},
-                    files={"file": ("SISMO.png", imagem, "image/png")},
-                    timeout=30
-                )
+            files = {"file": ("SISMO.png", image_bytes, "image/png")}
+            r = session.post(
+                DISCORD_WEBHOOK,
+                data={"content": mensagem},
+                files=files,
+                timeout=25
+            )
 
             if r.status_code in (200, 204):
                 print(f"Discord: enviado à {tentativa}ª tentativa.")
@@ -145,18 +168,17 @@ def enviar_discord(sismo, tentativas=5):
         except Exception as e:
             print(f"Erro ao enviar para o Discord: {e}")
 
-        time.sleep(5)
+        time.sleep(3 + tentativa)
 
     return False
 
 
 def obter_sismos():
-    headers = {"User-Agent": "Mozilla/5.0"}
     sismos = []
 
     for url, regiao in [(API_CONTINENTE, "Continente e Madeira"), (API_ACORES, "Açores")]:
         try:
-            response = requests.get(url, headers=headers, timeout=30)
+            response = session.get(url, timeout=20)
             response.raise_for_status()
             dados = response.json()
 
@@ -187,17 +209,16 @@ def obter_sismos():
         try:
             time_str = s["time"].replace("Z", "+00:00")
             s["datetime"] = datetime.fromisoformat(time_str)
-        except:
+        except Exception:
             try:
                 s["datetime"] = datetime.fromisoformat(s["time"])
-            except:
+            except Exception:
                 try:
                     s["datetime"] = datetime.strptime(s["time"], "%Y-%m-%d %H:%M:%S")
-                except:
-                    s["datetime"] = datetime.now()
+                except Exception:
+                    s["datetime"] = datetime.now(timezone.utc)
 
     sismos.sort(key=lambda x: x["datetime"], reverse=True)
-
     return {
         "owner": "IPMA",
         "country": "PT",
@@ -206,46 +227,37 @@ def obter_sismos():
     }
 
 
-def get_latest_sismo():
-    data = obter_sismos()
-    if not data["data"]:
-        return None
-
-    s = data["data"][0]
-    data_formatada = s["datetime"].strftime("%d-%m-%Y pelas %H:%M (hora local)")
-
-    return {
-        "id": s["time"],
-        "location": s.get("obsRegion") or "Portugal",
-        "scale": s["magnitude"] or 0.0,
-        "date": data_formatada,
-        "intensity": "Sem info a esta hora",
-        "latitude": s["latitude"],
-        "longitude": s["longitude"]
-    }
+def add_enviado(sismo_id: str):
+    """Adiciona ao set e remove o mais antigo se ultrapassar o limite."""
+    if sismo_id in sismos_enviados:
+        return
+    if len(sismos_enviados) >= MAX_SENT:
+        oldest = _sismos_order.popleft()
+        sismos_enviados.discard(oldest)
+    sismos_enviados.add(sismo_id)
+    _sismos_order.append(sismo_id)
 
 
 def monitor_sismos():
-    global sismos_enviados
     print("Monitor de sismos iniciado.")
+    consecutive_errors = 0
 
     while True:
         try:
             data = obter_sismos()
 
             if not data["data"]:
-                time.sleep(60)
+                time.sleep(45)
                 continue
 
             novos = [s for s in data["data"] if s["time"] not in sismos_enviados]
 
             if not novos:
-                # print("Sem novos sismos.")
-                time.sleep(60)
+                consecutive_errors = 0
+                time.sleep(45)
                 continue
 
             novos.sort(key=lambda x: x["datetime"])
-
             print(f"Foram encontrados {len(novos)} novos sismos.")
 
             for s in novos:
@@ -259,18 +271,29 @@ def monitor_sismos():
                     "longitude": s["longitude"]
                 }
 
-                print(f"Enviar {sismo['location']} M{sismo['scale']} {sismo['id']}")
+                print(f"Processar → {sismo['location']} M{sismo['scale']} | {sismo['id']}")
 
-                generate_final_image(sismo)
+                try:
+                    image_bytes = generate_final_image(sismo)
+                    if enviar_discord(sismo, image_bytes):
+                        add_enviado(s["time"])
+                        time.sleep(1.5)
+                except Exception as e:
+                    print(f"Erro ao processar sismo {s['time']}: {e}")
+                    # não marca como enviado → tenta na próxima ronda
 
-                if enviar_discord(sismo):
-                    sismos_enviados.add(s["time"])
-                    time.sleep(2)
+            consecutive_errors = 0
+            gc.collect()
 
         except Exception as e:
-            print("Erro no monitor:", e)
+            consecutive_errors += 1
+            print(f"Erro no monitor (#{consecutive_errors}): {e}")
+            # Backoff exponencial leve
+            sleep_time = min(30 * consecutive_errors, 180)
+            time.sleep(sleep_time)
+            continue
 
-        time.sleep(60)
+        time.sleep(45)
 
 
 @app.route("/")
@@ -287,19 +310,23 @@ def api_sismos():
 def download_image():
     path = "assets/SISMO_TWEET.png"
     if os.path.exists(path):
-        return send_file(path, mimetype='image/png')
+        return send_file(path, mimetype="image/png")
     return "Imagem ainda não gerada.", 404
 
 
 if __name__ == "__main__":
     os.makedirs("assets", exist_ok=True)
 
+    # Marcar sismos existentes como já enviados
     data = obter_sismos()
     for s in data["data"]:
-        sismos_enviados.add(s["time"])
+        add_enviado(s["time"])
 
     print(f"{len(sismos_enviados)} sismos existentes ignorados.")
 
-    threading.Thread(target=monitor_sismos, daemon=True).start()
+    # Thread do monitor
+    t = threading.Thread(target=monitor_sismos, daemon=True, name="SismoMonitor")
+    t.start()
 
-    app.run(host="0.0.0.0", port=9076, debug=False, use_reloader=False)
+    # Flask
+    app.run(host="0.0.0.0", port=9076, debug=False, use_reloader=False, threaded=True)
