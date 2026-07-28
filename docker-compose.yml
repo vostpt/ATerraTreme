@@ -1,0 +1,13 @@
+services:
+  aterratreme:
+    build: .
+    container_name: aterratreme
+    restart: unless-stopped
+    ports:
+      - "9076:9076"
+    environment:
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+    volumes:
+      - ./assets:/app/assets
+    env_file:
+      - .env
