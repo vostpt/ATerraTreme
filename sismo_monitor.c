@@ -245,6 +245,8 @@ void monitor_loop(void) {
         "https://api.ipma.pt/open-data/observation/seismic/3.json"
     };
 
+    int first_run = 1;
+
     printf("C Monitor iniciado (intervalo = %d segundos)\n", POLL_INTERVAL);
 
     while (1) {
@@ -272,14 +274,26 @@ void monitor_loop(void) {
                     continue;
 
                 const char *id = time_item->valuestring;
+
                 if (already_sent(id))
                     continue;
 
-                process_new_quake(quake);
-                usleep(1500000);   // 1.5 segundos entre notificações
+                if (first_run) {
+                    mark_sent(id);
+                } else {
+                    /* A partir da segunda execução processamos normalmente */
+                    process_new_quake(quake);
+                    usleep(1500000);   // 1.5 s entre notificações
+                }
             }
 
             cJSON_Delete(root);
+        }
+
+        if (first_run) {
+            printf("Primeira execução concluída: %d sismos marcados como enviados.\n",
+                   sent_count);
+            first_run = 0;
         }
 
         sleep(POLL_INTERVAL);
