@@ -2,14 +2,12 @@ services:
   aterratreme:
     build: .
     restart: unless-stopped
-    # Coolify: set "Ports Exposes" to 9076 (must match PORT / EXPOSE).
-    # Prefer Coolify's Dockerfile build pack over Compose when using its proxy.
-    ports:
-      - "9076:9076"
+    # Coolify: do NOT publish host ports — that breaks Traefik and causes Bad Gateway.
+    # Coolify routes via expose + "Ports Exposes" / EXPOSE. For local access only, uncomment:
+    # ports:
+    #   - "9076:80"
     expose:
-      - "9076"
+      - "80"
     environment:
-      PORT: "9076"
+      PORT: "80"
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
-    # Do not bind-mount ./assets — an empty host dir overwrites image templates
-    # and breaks Discord card generation on Coolify.

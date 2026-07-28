@@ -27,12 +27,13 @@ COPY static/ ./static/
 
 ENV PYTHONUNBUFFERED=1 \
     MPLBACKEND=Agg \
-    PORT=9076
+    PORT=80
 
-EXPOSE 9076
+# Coolify Traefik routes to this port — keep in sync with PORT and Coolify "Ports Exposes"
+EXPOSE 80
 
-# Must not depend on IPMA — Coolify/Traefik skip routing unhealthy containers
-HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
-    CMD curl -f http://127.0.0.1:${PORT}/health || exit 1
+# Lightweight probe (must not call IPMA). Failing health → Traefik 502/503.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -f http://127.0.0.1:80/health || exit 1
 
 CMD ["python", "app.py"]

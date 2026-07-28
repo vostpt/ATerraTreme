@@ -19,7 +19,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
-PORT = int(os.environ.get("PORT", "9076"))
+# Coolify defaults Ports Exposes to 80 — mismatch causes Bad Gateway (502)
+PORT = int(os.environ.get("PORT", "80"))
 
 app = Flask(__name__)
 # Coolify / Traefik terminate TLS and forward X-Forwarded-* headers
