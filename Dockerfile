@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python deps first
+# Install Python deps first (better layer caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -25,19 +25,14 @@ COPY assets/ ./assets/
 COPY templates/ ./templates/
 COPY static/ ./static/
 
-
-# RUN mkdir -p /app/assets
-
-# Environment
 ENV PYTHONUNBUFFERED=1 \
     MPLBACKEND=Agg \
     PORT=9076
 
 EXPOSE 9076
 
-# Healthcheck
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:9076/api/sismos || exit 1
+# Must not depend on IPMA — Coolify/Traefik skip routing unhealthy containers
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
+    CMD curl -f http://127.0.0.1:${PORT}/health || exit 1
 
-# Run the app
 CMD ["python", "app.py"]

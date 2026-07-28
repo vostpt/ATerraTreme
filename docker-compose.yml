@@ -1,13 +1,15 @@
 services:
   aterratreme:
     build: .
-    container_name: aterratreme
     restart: unless-stopped
+    # Coolify: set "Ports Exposes" to 9076 (must match PORT / EXPOSE).
+    # Prefer Coolify's Dockerfile build pack over Compose when using its proxy.
     ports:
       - "9076:9076"
+    expose:
+      - "9076"
     environment:
-      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
-    volumes:
-      - ./assets:/app/assets
-    env_file:
-      - .env
+      PORT: "9076"
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+    # Do not bind-mount ./assets — an empty host dir overwrites image templates
+    # and breaks Discord card generation on Coolify.

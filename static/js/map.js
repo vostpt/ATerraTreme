@@ -392,12 +392,14 @@ async function carregarSismos() {
         atualizarMarcadores(dados);
 
         state.hasLoaded = true;
-        loadingEl.style.display = "none";
     } catch (error) {
         console.error(error);
         if (!state.hasLoaded) {
             alert("Não foi possível carregar os dados.");
         }
+    } finally {
+        // Always clear overlay so a failed API never leaves a blank screen
+        loadingEl.style.display = "none";
     }
 }
 

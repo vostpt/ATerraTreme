@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, render_template, send_file
+from werkzeug.middleware.proxy_fix import ProxyFix
 import requests
 import pandas as pd
 from PIL import Image, ImageFont, ImageDraw
@@ -18,8 +19,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
+PORT = int(os.environ.get("PORT", "9076"))
 
 app = Flask(__name__)
+# Coolify / Traefik terminate TLS and forward X-Forwarded-* headers
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 # APIs IPMA
 API_CONTINENTE = "https://api.ipma.pt/open-data/observation/seismic/7.json"
@@ -301,6 +305,12 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/health")
+def health():
+    """Lightweight probe for Docker/Coolify — does not call external APIs."""
+    return jsonify({"status": "ok"}), 200
+
+
 @app.route("/api/sismos")
 def api_sismos():
     return jsonify(obter_sismos())
@@ -314,19 +324,25 @@ def download_image():
     return "Imagem ainda não gerada.", 404
 
 
+def bootstrap_monitor():
+    """Seed known earthquakes then enter the Discord monitor loop."""
+    try:
+        data = obter_sismos()
+        for s in data["data"]:
+            add_enviado(s["time"])
+        print(f"{len(sismos_enviados)} sismos existentes ignorados.")
+    except Exception as e:
+        print(f"Aviso: não foi possível pré-carregar sismos: {e}")
+
+    monitor_sismos()
+
+
 if __name__ == "__main__":
     os.makedirs("assets", exist_ok=True)
 
-    # Marcar sismos existentes como já enviados
-    data = obter_sismos()
-    for s in data["data"]:
-        add_enviado(s["time"])
-
-    print(f"{len(sismos_enviados)} sismos existentes ignorados.")
-
-    # Thread do monitor
-    t = threading.Thread(target=monitor_sismos, daemon=True, name="SismoMonitor")
+    # Start monitor in background so Flask binds immediately (Coolify healthchecks)
+    t = threading.Thread(target=bootstrap_monitor, daemon=True, name="SismoMonitor")
     t.start()
 
-    # Flask
-    app.run(host="0.0.0.0", port=9076, debug=False, use_reloader=False, threaded=True)
+    print(f"A servir em 0.0.0.0:{PORT}")
+    app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False, threaded=True)
