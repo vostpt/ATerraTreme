@@ -212,6 +212,7 @@ def obter_sismos():
                     "obsRegion": s.get("obsRegion") or s.get("regionName"),
                     "magnitude": mag,
                     "depth": s.get("depth"),
+                    "intensity": s.get("degree") if s.get("degree") not in (None, "", "0") else "Sem info",
                     "latitude": float(s.get("lat") or s.get("latitude") or 0),
                     "longitude": float(s.get("lon") or s.get("longitude") or 0),
                     "time": s.get("time"),
@@ -281,7 +282,7 @@ def monitor_sismos():
                     "id": s["time"],
                     "location": s.get("obsRegion") or "Portugal",
                     "scale": s["magnitude"] or 0.0,
-                    "date": s["datetime"].strftime("%d-%m-%Y pelas %H:%M (hora local)"),
+                    "date": s["datetime"].strftime("%d-%m-%Y pelas %H:%M UTC"),
                     "intensity": "Sem info a esta hora",
                     "latitude": s["latitude"],
                     "longitude": s["longitude"]

@@ -133,6 +133,11 @@ function criarPopup(s) {
             <td>${Number(s.longitude).toFixed(4)}°</td>
         </tr>
         <tr>
+            <td><i class="bi bi-speedometer2"></i></td>
+            <td>Intensidade</td>
+            <td>${s.intensity}</td>
+        </tr>
+        <tr>
             <td><i class="bi bi-broadcast"></i></td>
             <td>Origem</td>
             <td>${s.source}</td>
