@@ -123,6 +123,17 @@ def generate_final_image(sismo_data) -> bytes:
         overlay_text(template, str(latest['date']), (242, 772), font, "#00A396")
         overlay_text(template, str(latest['intensity']), (520, 832), font, "#703D25")
 
+
+        # Image with just info (no map)
+        info_buf = io.BytesIO()
+        template.save("assets/SISMO_INFO.png", optimize=True)
+        template.save(info_buf, format="PNG", optimize=True)
+        info_buf.seek(0)
+        info_data = info_buf.getvalue()
+        info_buf.close()
+
+
+        # Image with map (final)
         final = Image.new("RGB", (2160, 1080), color="white")
         final.paste(template, (0, 0))
         final.paste(map_img, (1080, 0))
@@ -140,10 +151,10 @@ def generate_final_image(sismo_data) -> bytes:
         del map_img, template, final, df
         gc.collect()
 
-        return data
+        return data, info_data
 
 
-def enviar_discord(sismo, image_bytes: bytes, tentativas=4):
+def enviar_discord(sismo, image_bytes: bytes, info_image: bytes, tentativas=4):
     if not DISCORD_WEBHOOK:
         print("Webhook não configurado.")
         return False
@@ -157,7 +168,7 @@ def enviar_discord(sismo, image_bytes: bytes, tentativas=4):
 
     for tentativa in range(1, tentativas + 1):
         try:
-            files = {"file": ("SISMO.png", image_bytes, "image/png")}
+            files = {"file1": ("SISMO.png", image_bytes, "image/png"), "file2": ("SISMO_INFO.png", info_image, "image/png")}
             r = session.post(
                 DISCORD_WEBHOOK,
                 data={"content": mensagem},
@@ -279,8 +290,8 @@ def monitor_sismos():
                 print(f"Processar → {sismo['location']} M{sismo['scale']} | {sismo['id']}")
 
                 try:
-                    image_bytes = generate_final_image(sismo)
-                    if enviar_discord(sismo, image_bytes):
+                    image_bytes, info_image = generate_final_image(sismo)
+                    if enviar_discord(sismo, image_bytes, info_image):
                         add_enviado(s["time"])
                         time.sleep(1.5)
                 except Exception as e:
