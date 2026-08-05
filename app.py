@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
-# Coolify defaults Ports Exposes to 80 — mismatch causes Bad Gateway (502)
-PORT = int(os.environ.get("PORT", "80"))
+# Coolify Dockerfile pack defaults PORT / Ports Exposes to 3000
+PORT = int(os.environ.get("PORT", "3000"))
 
 app = Flask(__name__)
 # Coolify / Traefik terminate TLS and forward X-Forwarded-* headers

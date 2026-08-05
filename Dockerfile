@@ -22,13 +22,15 @@ RUN echo "CACHEBUST=$CACHEBUST"
 
 COPY . .
 
+# Coolify Dockerfile pack defaults Ports Exposes / PORT to 3000.
+# Healthcheck must use $PORT (runtime), not a hardcoded port.
 ENV PYTHONUNBUFFERED=1 \
     MPLBACKEND=Agg \
-    PORT=80
+    PORT=3000
 
-EXPOSE 80
+EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -f http://127.0.0.1:80/health || exit 1
+    CMD curl -f http://127.0.0.1:${PORT:-3000}/health || exit 1
 
 CMD ["python", "app.py"]

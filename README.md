@@ -62,7 +62,7 @@ Start:
 python app.py
 ```
 
-By default the application listens on `http://0.0.0.0:80` (or the value of `PORT`).
+By default the application listens on `http://0.0.0.0:3000` (or the value of `PORT`).
 
 ---
 
@@ -71,13 +71,13 @@ By default the application listens on `http://0.0.0.0:80` (or the value of `PORT
 | Variable               | Required | Description                                      |
 |------------------------|----------|--------------------------------------------------|
 | `DISCORD_WEBHOOK_URL`  | No       | Discord webhook URL for earthquake alerts        |
-| `PORT`                 | No       | HTTP port (default `80`)                         |
+| `PORT`                 | No       | HTTP port (default `3000`, Coolify’s default)    |
 
 Example (`.env`):
 
 ```env
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-PORT=80
+PORT=3000
 ```
 
 ---
@@ -90,18 +90,21 @@ PORT=80
 docker compose up -d --build
 ```
 
-The application is available on the port defined by `PORT` (exposed internally as 80).  
+The application is available on the port defined by `PORT` (exposed internally as 3000).  
 For local access, uncomment the `ports` section in `docker-compose.yml`:
 
 ```yaml
 ports:
-  - "9076:80"
+  - "9076:3000"
 ```
 
 ### Healthcheck
 
-The container includes a healthcheck that hits `/health`.
+The container healthcheck probes `/health` on `$PORT` (same port the app listens on).
 
+### Coolify
+
+Use the **Dockerfile** build pack. Coolify injects `PORT=3000` by default — do **not** set `PORT=80` in Coolify env vars (that fights the proxy). Keep only `DISCORD_WEBHOOK_URL` if needed.
 ---
 
 ## Endpoints
