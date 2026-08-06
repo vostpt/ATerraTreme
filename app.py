@@ -121,7 +121,7 @@ def generate_final_image(sismo_data) -> bytes:
         overlay_text(template, str(latest['location']).upper(), (390, 559), font, "#703D25")
         overlay_text(template, str(latest['scale']), (455, 629), font, "#703D25")
         overlay_text(template, str(latest['date']), (242, 772), font, "#00A396")
-        overlay_text(template, str(latest['intensity']), (520, 832), font, "#703D25")
+        overlay_text(template, str(latest['intensity']), (520, 832), font, "#00A396")
 
 
         # Image with just info (no map)
@@ -132,6 +132,13 @@ def generate_final_image(sismo_data) -> bytes:
         info_data = info_buf.getvalue()
         info_buf.close()
 
+        # Image with the just the map
+        map_buf = io.BytesIO()
+        map_img.save("assets/MAPA_SISMO.png", optimize=True)
+        map_img.save(map_buf, format="PNG", optimize=True)
+        map_buf.seek(0)
+        map_data = map_buf.getvalue()
+        map_buf.close()
 
         # Image with map (final)
         final = Image.new("RGB", (2160, 1080), color="white")
@@ -151,10 +158,10 @@ def generate_final_image(sismo_data) -> bytes:
         del map_img, template, final, df
         gc.collect()
 
-        return data, info_data
+        return data, info_data, map_data
 
 
-def enviar_discord(sismo, image_bytes: bytes, info_image: bytes, tentativas=4):
+def enviar_discord(sismo, image_bytes: bytes, info_image: bytes, map_image: bytes, tentativas=4):
     if not DISCORD_WEBHOOK:
         print("Webhook não configurado.")
         return False
@@ -168,7 +175,7 @@ def enviar_discord(sismo, image_bytes: bytes, info_image: bytes, tentativas=4):
 
     for tentativa in range(1, tentativas + 1):
         try:
-            files = {"file1": ("SISMO.png", image_bytes, "image/png"), "file2": ("SISMO_INFO.png", info_image, "image/png")}
+            files = {"file1": ("SISMO.png", image_bytes, "image/png"), "file2": ("SISMO_INFO.png", info_image, "image/png"), "file3": ("SISMO_MAP.png", map_image, "image/png")}
             r = session.post(
                 DISCORD_WEBHOOK,
                 data={"content": mensagem},
@@ -268,7 +275,8 @@ def monitor_sismos():
                 continue
 
             novos = [s for s in data["data"] if s["time"] not in sismos_enviados]
-
+            # novos = data["data"][:10]  # apenas os 10 mais recentes (for testing purposes)
+            
             if not novos:
                 consecutive_errors = 0
                 time.sleep(45)
@@ -291,8 +299,8 @@ def monitor_sismos():
                 print(f"Processar → {sismo['location']} M{sismo['scale']} | {sismo['id']}")
 
                 try:
-                    image_bytes, info_image = generate_final_image(sismo)
-                    if enviar_discord(sismo, image_bytes, info_image):
+                    image_bytes, info_image, map_image = generate_final_image(sismo)
+                    if enviar_discord(sismo, image_bytes, info_image, map_image):
                         add_enviado(s["time"])
                         time.sleep(1.5)
                 except Exception as e:
