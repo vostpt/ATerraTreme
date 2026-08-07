@@ -1,0 +1,13 @@
+services:
+  aterratreme:
+    build: .
+    restart: unless-stopped
+    # Coolify: do NOT publish host ports — that breaks Traefik and causes Bad Gateway.
+    # Coolify Dockerfile pack defaults to port 3000. For local access only, uncomment:
+    # ports:
+    #   - "9076:3000"
+    expose:
+      - "3000"
+    environment:
+      PORT: ${PORT:-3000}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}

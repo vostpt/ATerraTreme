@@ -1,6 +1,10 @@
-pandas
-Pillow
-matplotlib
-contextily
-shapely
-geopandas
+flask>=3.0
+requests>=2.31
+python-dotenv>=1.0
+pandas>=2.0
+Pillow>=10.0
+matplotlib>=3.8
+contextily>=1.4
+geopandas>=0.14
+shapely>=2.0
+pyproj>=3.6

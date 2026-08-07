@@ -7,7 +7,7 @@ const totalEl = document.getElementById("total-sismos");
 
 const map = L.map("map", {
     center: [39.6945, -8.1306],
-    zoom: 4,
+    zoom: 5,
     minZoom: 2,
     maxZoom: 13,
     zoomControl: false,
@@ -58,6 +58,22 @@ const heatLayer = L.heatLayer([], {
     }
 });
 
+// Camada das fronteiras das placas tectónicas
+const platesLayer = L.geoJSON(null, {
+    style: {
+        color: "#ff7043",
+        weight: 1.5,
+        opacity: 0.7,
+        lineCap: "round",
+        lineJoin: "round"
+    },
+    interactive: false
+});
+
+// Zoom máximo em que as placas ainda são mostradas
+// (acima deste valor as linhas desaparecem)
+const PLATES_MAX_ZOOM = 7;
+
 const state = {
     markers: [],
     earthquakes: [],
@@ -67,6 +83,20 @@ const state = {
     hasLoaded: false,
     firstLoad: true
 };
+
+function atualizarVisibilidadePlacas() {
+    const zoom = map.getZoom();
+
+    if (zoom <= PLATES_MAX_ZOOM) {
+        if (!map.hasLayer(platesLayer)) {
+            platesLayer.addTo(map);
+        }
+    } else {
+        if (map.hasLayer(platesLayer)) {
+            map.removeLayer(platesLayer);
+        }
+    }
+}
 
 function corMagnitude(m) {
     if (m == null)
@@ -131,6 +161,11 @@ function criarPopup(s) {
             <td><i class="bi bi-geo"></i></td>
             <td>Longitude</td>
             <td>${Number(s.longitude).toFixed(4)}°</td>
+        </tr>
+        <tr>
+            <td><i class="bi bi-speedometer2"></i></td>
+            <td>Intensidade</td>
+            <td>${s.intensity}</td>
         </tr>
         <tr>
             <td><i class="bi bi-broadcast"></i></td>
@@ -373,6 +408,30 @@ function configurarControles() {
     });
 }
 
+async function carregarPlacas() {
+    try {
+        // https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json
+        // Thanks to Fraxen for the tectonic plates GeoJSON data
+        // Repo: https://github.com/fraxen/tectonicplates/
+        const response = await fetch("/static/data/plates.geojson", {
+            cache: "no-store"
+        });
+
+        if (!response.ok) {
+            throw new Error("Erro ao carregar placas tectónicas");
+        }
+
+        const geojson = await response.json();
+        platesLayer.addData(geojson);
+
+        // Atualiza a visibilidade depois de carregar os dados
+        atualizarVisibilidadePlacas();
+
+    } catch (error) {
+        console.error("Falha ao carregar fronteiras das placas:", error);
+    }
+}
+
 async function carregarSismos() {
     try {
         if (!state.hasLoaded) {
@@ -392,12 +451,14 @@ async function carregarSismos() {
         atualizarMarcadores(dados);
 
         state.hasLoaded = true;
-        loadingEl.style.display = "none";
     } catch (error) {
         console.error(error);
         if (!state.hasLoaded) {
             alert("Não foi possível carregar os dados.");
         }
+    } finally {
+        // Always clear overlay so a failed API never leaves a blank screen
+        loadingEl.style.display = "none";
     }
 }
 
@@ -437,9 +498,13 @@ function ultimas24h(dataHora) {
 function inicializarMapa() {
     definirLegenda();
     configurarControles();
+    carregarPlacas();
     carregarSismos();
     iniciarAtualizacoes();
     map.on("click", selecionarSismoMaisProximo);
+
+    // Atualiza a visibilidade das placas sempre que o zoom muda
+    map.on("zoomend", atualizarVisibilidadePlacas);
 }
 
 inicializarMapa();
