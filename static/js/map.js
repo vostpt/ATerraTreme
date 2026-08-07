@@ -255,9 +255,23 @@ function atualizarMarcadores(dados) {
         state.markers.push(marker);
         state.earthquakes.push({
             marker,
-            latlng: L.latLng(s.latitude, s.longitude)
+            latlng: L.latLng(s.latitude, s.longitude),
+            time: new Date(s.time).getTime(),
+            data: s
         });
     });
+
+    // Atualiza o intervalo de datas
+    if (dados.data.length) {
+        const times = dados.data.map(s => new Date(s.time).getTime());
+        minDate = Math.min(...times);
+        maxDate = Math.max(...times);
+
+        // Atualiza os labels e a barra se o controlo já existir
+        if (window._updateDateRangeUI) {
+            window._updateDateRangeUI();
+        }
+    }
 
     heatLayer.setLatLngs(heatPoints);
     heatLayer.redraw();
@@ -306,46 +320,257 @@ function selecionarSismoMaisProximo(e) {
 
 }
 
+// Guarda as datas extrema dos sismos carregados
+let minDate = null;
+let maxDate = null;
+
+function initDateRange() {
+    const startInput = document.getElementById("range-start");
+    const endInput = document.getElementById("range-end");
+    const labelStart = document.getElementById("label-start");
+    const labelEnd = document.getElementById("label-end");
+    const track = document.getElementById("range-track");
+
+    if (!startInput || !endInput) return;
+
+    function updateLabels(e) {
+        if (!minDate || !maxDate) return;
+
+        const total = maxDate - minDate;
+        let startVal = Number(startInput.value);
+        let endVal = Number(endInput.value);
+
+        // Impede que os handles se cruzem
+        if (startVal > endVal) {
+            if (e && e.target === startInput) {
+                endInput.value = startVal;
+                endVal = startVal;
+            } else {
+                startInput.value = endVal;
+                startVal = endVal;
+            }
+        }
+
+        const startTs = minDate + (startVal / 100) * total;
+        const endTs = minDate + (endVal / 100) * total;
+
+        labelStart.textContent = formatDate(startTs);
+        labelEnd.textContent = formatDate(endTs);
+
+        // Barra entre os dois handles
+        const top = 100 - endVal;
+        const height = endVal - startVal;
+        track.style.top = `${top}%`;
+        track.style.height = `${height}%`;
+
+        filtrarSismosPorData(startTs, endTs);
+    }
+
+    startInput.addEventListener("input", updateLabels);
+    endInput.addEventListener("input", updateLabels);
+
+    window._updateDateRangeUI = updateLabels;
+}
+
+function formatDate(ts) {
+    const d = new Date(ts);
+    return d.toLocaleDateString("pt-PT", {
+        day: "2-digit",
+        month: "2-digit",
+    });
+}
+function filtrarSismosPorData(startTs, endTs) {
+    markersLayer.clearLayers();
+
+    const heatPoints = [];
+    let maxMagnitude = 0;
+
+    // Primeiro passa para achar a magnitude máxima do intervalo filtrado
+    state.earthquakes.forEach(eq => {
+        if (eq.time >= startTs && eq.time <= endTs) {
+            const mag = eq.data?.magnitude ?? 0;
+            if (mag > maxMagnitude) maxMagnitude = mag;
+        }
+    });
+
+    state.earthquakes.forEach(eq => {
+        if (eq.time < startTs || eq.time > endTs) return;
+
+        const s = eq.data;
+        const recente = ultimas24h(s.time);
+
+        // Marcador principal
+        eq.marker.addTo(markersLayer);
+
+        // Halo de pulsação (sismos recentes)
+        if (recente) {
+            const tamanho = (raioMagnitude(s.magnitude) + 8) * 2;
+
+            const halo = L.marker([s.latitude, s.longitude], {
+                interactive: false,
+                zIndexOffset: -1000,
+                icon: L.divIcon({
+                    className: "pulse-marker",
+                    html: `<div class="pulse" style="width:${tamanho}px;height:${tamanho}px"></div>`,
+                    iconSize: [tamanho, tamanho],
+                    iconAnchor: [tamanho / 2, tamanho / 2]
+                })
+            });
+            halo.addTo(markersLayer);
+        }
+
+        // Hit area
+        const hitArea = L.circleMarker([s.latitude, s.longitude], {
+            radius: Math.max(raioMagnitude(s.magnitude), 18),
+            stroke: false,
+            fill: true,
+            fillColor: "#ffffff",
+            fillOpacity: 0.01
+        });
+        hitArea.on("click", () => eq.marker.openPopup());
+        hitArea.addTo(markersLayer);
+
+        // Heatmap
+        const intensidade = maxMagnitude > 0
+            ? (s.magnitude ?? 0) / maxMagnitude
+            : 0;
+        heatPoints.push([s.latitude, s.longitude, intensidade]);
+    });
+
+    heatLayer.setLatLngs(heatPoints);
+    heatLayer.redraw();
+}
+
+function ajustarAlturaIntervalo() {
+    const wrapper = document.querySelector(".range-wrapper");
+    const control = document.querySelector(".intervalo");
+    if (!wrapper || !control) return;
+
+    const mapEl = document.getElementById("map");
+    const mapHeight = mapEl.clientHeight;
+
+    // Espaço ocupado pelos botões de cima (basemap + heat) ≈ 100px
+    // Espaço da legenda de magnitude ≈ 160px
+    // Padding e margem de segurança
+    const topButtons = 110;
+    const bottomLegend = 170;
+    const padding = 40;
+
+    const available = mapHeight - topButtons - bottomLegend - padding;
+
+    // Altura mínima e máxima razoáveis
+    const height = Math.max(120, Math.min(available, 380));
+
+    wrapper.style.height = `${height}px`;
+
+    // Garante que o contentor pai também cresce
+    control.style.height = "auto";
+}
+
+function definirIntervalo() {
+    const intervalo = L.control({
+        position: "topleft"
+    });
+
+    intervalo.onAdd = function () {
+        const div = L.DomUtil.create("div", "intervalo");
+        div.innerHTML = `
+            <div class="intervalo-title">
+                <i class="bi bi-calendar-range"></i>
+            </div>
+
+            <div class="intervalo-content">
+                <div class="intervalo-labels">
+                    <span>Início</span>
+                    <strong id="label-start">—</strong>
+                </div>
+
+                <div class="range-wrapper">
+                    <div class="range-track" id="range-track"></div>
+                    <input type="range" id="range-start" min="0" max="100" value="0" step="0.1">
+                    <input type="range" id="range-end"   min="0" max="100" value="100" step="0.1">
+                </div>
+
+                <div class="intervalo-labels">
+                    <span>Fim</span>
+                    <strong id="label-end">—</strong>
+                </div>
+            </div>
+        `;
+
+        // Impede que o clique no controlo interaja com o mapa
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.disableScrollPropagation(div);
+
+        return div;
+    };
+
+    intervalo.addTo(map);
+
+    // Inicializa a lógica depois de o controlo estar no DOM
+    ajustarAlturaIntervalo();
+    initDateRange();
+}
+
 function definirLegenda() {
     const legenda = L.control({
         position: "bottomleft"
     });
 
     legenda.onAdd = function () {
-        const div = L.DomUtil.create("div", "legend");
+        const div = L.DomUtil.create("div", "legend-control");
+
         div.innerHTML = `
-        <div style="background-color: #1b1f24; padding: 5px; border-radius: 5px; color: #fff; font-size: 14px;">
-            <div class="legend-title">
-                <i class="bi bi-activity"></i>
-                Magnitude
+            <button id="legend-btn" title="Legenda de Magnitude" class="legend-toggle">
+                <i class="bi bi-info-square-fill"></i>
+            </button>
+
+            <div id="legend-panel" class="legend-panel hidden">
+                <div class="legend-title">
+                    <i class="bi bi-activity"></i>
+                    Magnitude
+                </div>
+                <table class="legend-table">
+                    <tr>
+                        <td><i class="bi bi-record-circle-fill" style="color:#4a4a4a"></i></td>
+                        <td>&lt; 2.0</td>
+                    </tr>
+                    <tr>
+                        <td><i class="bi bi-record-circle-fill" style="color:#7B4B1A"></i></td>
+                        <td>2.0 – 2.9</td>
+                    </tr>
+                    <tr>
+                        <td><i class="bi bi-record-circle-fill" style="color:#A66A2B"></i></td>
+                        <td>3.0 – 3.9</td>
+                    </tr>
+                    <tr>
+                        <td><i class="bi bi-record-circle-fill" style="color:#D46A00"></i></td>
+                        <td>4.0 – 4.9</td>
+                    </tr>
+                    <tr>
+                        <td><i class="bi bi-record-circle-fill" style="color:#E53935"></i></td>
+                        <td>5.0 – 5.9</td>
+                    </tr>
+                    <tr>
+                        <td><i class="bi bi-record-circle-fill" style="color:#8E0000"></i></td>
+                        <td>≥ 6.0</td>
+                    </tr>
+                </table>
             </div>
-            <table class="legend-table">
-                <tr>
-                    <td><i class="bi bi-record-circle-fill" style="color:#4a4a4a"></i></td>
-                    <td>&lt; 2.0</td>
-                </tr>
-                <tr>
-                    <td><i class="bi bi-record-circle-fill" style="color:#7B4B1A"></i></td>
-                    <td>2.0 – 2.9</td>
-                </tr>
-                <tr>
-                    <td><i class="bi bi-record-circle-fill" style="color:#A66A2B"></i></td>
-                    <td>3.0 – 3.9</td>
-                </tr>
-                <tr>
-                    <td><i class="bi bi-record-circle-fill" style="color:#D46A00"></i></td>
-                    <td>4.0 – 4.9</td>
-                </tr>
-                <tr>
-                    <td><i class="bi bi-record-circle-fill" style="color:#E53935"></i></td>
-                    <td>5.0 – 5.9</td>
-                </tr>
-                <tr>
-                    <td><i class="bi bi-record-circle-fill" style="color:#8E0000"></i></td>
-                    <td>≥ 6.0</td>
-                </tr>
-            </table>
-        </div>`;
+        `;
+
+        L.DomEvent.disableClickPropagation(div);
+
+        // Toggle da legenda
+        const btn = div.querySelector("#legend-btn");
+        const panel = div.querySelector("#legend-panel");
+
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            panel.classList.toggle("hidden");
+            btn.classList.toggle("active");
+        });
+
         return div;
     };
 
@@ -498,6 +723,7 @@ function ultimas24h(dataHora) {
 function inicializarMapa() {
     definirLegenda();
     configurarControles();
+    definirIntervalo();
     carregarPlacas();
     carregarSismos();
     iniciarAtualizacoes();
@@ -505,6 +731,7 @@ function inicializarMapa() {
 
     // Atualiza a visibilidade das placas sempre que o zoom muda
     map.on("zoomend", atualizarVisibilidadePlacas);
+    window.addEventListener("resize", ajustarAlturaIntervalo);
 }
 
 inicializarMapa();
