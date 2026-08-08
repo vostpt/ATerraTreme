@@ -67,7 +67,8 @@ const platesLayer = L.geoJSON(null, {
         lineCap: "round",
         lineJoin: "round"
     },
-    interactive: false
+    interactive: false,
+    attribution: 'Placas: <a href="https://github.com/fraxen/tectonicplates">PB2002</a> (ODC-By 1.0)'
 });
 
 // Zoom máximo em que as placas ainda são mostradas
