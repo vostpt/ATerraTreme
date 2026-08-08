@@ -71,7 +71,6 @@ const platesLayer = L.geoJSON(null, {
 });
 
 // Zoom máximo em que as placas ainda são mostradas
-// (acima deste valor as linhas desaparecem)
 const PLATES_MAX_ZOOM = 7;
 
 const state = {
@@ -99,32 +98,25 @@ function atualizarVisibilidadePlacas() {
 }
 
 function corMagnitude(m) {
-    if (m == null)
-        return "#555";
-
-    if (m < 2)
-        return "#4a4a4a";
-
-    if (m < 3)
-        return "#7B4B1A";
-
-    if (m < 4)
-        return "#A66A2B";
-
-    if (m < 5)
-        return "#D46A00";
-
-    if (m < 6)
-        return "#E53935";
-
+    if (m == null) return "#555";
+    if (m < 2) return "#4a4a4a";
+    if (m < 3) return "#7B4B1A";
+    if (m < 4) return "#A66A2B";
+    if (m < 5) return "#D46A00";
+    if (m < 6) return "#E53935";
     return "#8E0000";
 }
 
 function raioMagnitude(m) {
-    if (m == null)
-        return 5;
-
+    if (m == null) return 5;
     return 4 + Math.pow(m, 1.5);
+}
+
+/** Verifica se o sismo foi sentido (tem intensidade válida) */
+function temIntensidade(s) {
+    if (s.intensity == null || s.intensity == "Sem info") return false;
+    const val = String(s.intensity).trim().toLowerCase();
+    return val !== "" && val !== "—" && val !== "-" && val !== "n/a" && val !== "null" && val !== "0";
 }
 
 function criarPopup(s) {
@@ -165,7 +157,7 @@ function criarPopup(s) {
         <tr>
             <td><i class="bi bi-speedometer2"></i></td>
             <td>Intensidade</td>
-            <td>${s.intensity}</td>
+            <td>${s.intensity ?? "—"}</td>
         </tr>
         <tr>
             <td><i class="bi bi-broadcast"></i></td>
@@ -174,6 +166,84 @@ function criarPopup(s) {
         </tr>
     </table>
 </div>`;
+}
+
+function criarMarcador(s) {
+    const recente = ultimas24h(s.time);
+    const sentido = temIntensidade(s);
+    const raio = raioMagnitude(s.magnitude);
+
+    let marker = null;
+
+    if (!sentido) {
+        // Marcador principal
+        marker = L.circleMarker([s.latitude, s.longitude], {
+            radius: raio,
+            color: "#ffffff",
+            weight: recente ? 3 : 1.5,
+            fillColor: corMagnitude(s.magnitude),
+            fillOpacity: recente ? 1 : 0.9,
+            className: recente ? "earthquake-recent" : ""
+        });
+    } else {
+        marker = L.marker([s.latitude, s.longitude], {
+            radius: raio,
+            color: "#ffffff",
+            weight: recente ? 3 : 1.5,
+            fillColor: corMagnitude(s.magnitude),
+            fillOpacity: recente ? 1 : 0.9,
+            className: recente ? "earthquake-recent" : "",
+            zIndexOffset: 600,
+            icon: L.divIcon({
+                className: "sentido-badge",
+                html: `
+                    <div class="sentido-badge-inner" style="background-color: ${corMagnitude(s.magnitude)}">
+                        <i class="bi bi-activity"></i>
+                    </div>
+                `,
+                iconSize: [raio * 2, raio * 2],
+                iconAnchor: [raio, raio]
+            })
+        });
+
+    }
+
+    // Halo de pulsação (sismos recentes)
+    if (recente) {
+        const tamanho = (raio + 8) * 2;
+
+        const halo = L.marker([s.latitude, s.longitude], {
+            interactive: false,
+            zIndexOffset: -1000,
+            icon: L.divIcon({
+                className: "pulse-marker",
+                html: `<div class="pulse" style="width:${tamanho}px;height:${tamanho}px"></div>`,
+                iconSize: [tamanho, tamanho],
+                iconAnchor: [tamanho / 2, tamanho / 2]
+            })
+        });
+        halo.addTo(markersLayer);
+    }
+
+    marker.bindPopup(criarPopup(s), {
+        maxWidth: 320,
+        className: "earthquake-popup"
+    });
+
+    marker.addTo(markersLayer);
+
+    // Área de clique maior
+    const hitArea = L.circleMarker([s.latitude, s.longitude], {
+        radius: Math.max(raio, 18),
+        stroke: false,
+        fill: true,
+        fillColor: "#ffffff",
+        fillOpacity: 0.01
+    });
+    hitArea.on("click", () => marker.openPopup());
+    hitArea.addTo(markersLayer);
+
+    return marker;
 }
 
 function atualizarMarcadores(dados) {
@@ -190,67 +260,14 @@ function atualizarMarcadores(dados) {
     const bounds = [];
 
     dados.data.forEach((s) => {
-        const intensidade = maxMagnitude > 0
+        const intensidadeHeat = maxMagnitude > 0
             ? (s.magnitude ?? 0) / maxMagnitude
             : 0;
 
-        heatPoints.push([s.latitude, s.longitude, intensidade]);
+        heatPoints.push([s.latitude, s.longitude, intensidadeHeat]);
         bounds.push([s.latitude, s.longitude]);
 
-        const recente = ultimas24h(s.time);
-
-        const marker = L.circleMarker([s.latitude, s.longitude], {
-            radius: raioMagnitude(s.magnitude),
-
-            color: "#ffffff",
-            weight: recente ? 3 : 1,
-
-            fillColor: corMagnitude(s.magnitude),
-            fillOpacity: recente ? 1 : 0.9,
-
-            className: recente ? "earthquake-recent" : ""
-        });
-
-        if (recente) {
-
-            const tamanho = (raioMagnitude(s.magnitude) + 8) * 2;
-
-            const halo = L.marker([s.latitude, s.longitude], {
-                interactive: false,
-                zIndexOffset: -1000,
-                icon: L.divIcon({
-                    className: "pulse-marker",
-                    html: `<div class="pulse" style="width:${tamanho}px;height:${tamanho}px"></div>`,
-                    iconSize: [tamanho, tamanho],
-                    iconAnchor: [tamanho / 2, tamanho / 2]
-                })
-            });
-
-            halo.addTo(markersLayer);
-
-        }
-
-        marker.bindPopup(criarPopup(s), {
-            maxWidth: 320,
-            className: "earthquake-popup"
-        });
-
-        marker.addTo(markersLayer);
-
-        const hitArea = L.circleMarker([s.latitude, s.longitude], {
-            radius: Math.max(raioMagnitude(s.magnitude), 18),
-            stroke: false,
-            fill: true,
-            fillColor: "#ffffff",
-            fillOpacity: 0.01
-        });
-
-        hitArea.on("click", () => {
-            marker.openPopup();
-        });
-
-        hitArea.addTo(markersLayer);
-
+        const marker = criarMarcador(s);
 
         state.markers.push(marker);
         state.earthquakes.push({
@@ -267,7 +284,6 @@ function atualizarMarcadores(dados) {
         minDate = Math.min(...times);
         maxDate = Math.max(...times);
 
-        // Atualiza os labels e a barra se o controlo já existir
         if (window._updateDateRangeUI) {
             window._updateDateRangeUI();
         }
@@ -290,34 +306,26 @@ function atualizarMarcadores(dados) {
 }
 
 function selecionarSismoMaisProximo(e) {
-
     let maisProximo = null;
     let menorDistancia = Infinity;
 
     const pontoClique = map.latLngToContainerPoint(e.latlng);
 
     state.earthquakes.forEach(eq => {
-
         const pontoSismo = map.latLngToContainerPoint(eq.latlng);
-
         const distancia = pontoClique.distanceTo(pontoSismo);
 
         if (distancia < menorDistancia) {
             menorDistancia = distancia;
             maisProximo = eq;
         }
-
     });
 
-    // raio de seleção em pixels
     const tolerancia = window.innerWidth < 768 ? 35 : 20;
 
     if (maisProximo && menorDistancia <= tolerancia) {
-
         maisProximo.marker.openPopup();
-
     }
-
 }
 
 // Guarda as datas extrema dos sismos carregados
@@ -340,7 +348,6 @@ function initDateRange() {
         let startVal = Number(startInput.value);
         let endVal = Number(endInput.value);
 
-        // Impede que os handles se cruzem
         if (startVal > endVal) {
             if (e && e.target === startInput) {
                 endInput.value = startVal;
@@ -357,7 +364,6 @@ function initDateRange() {
         labelStart.textContent = formatDate(startTs);
         labelEnd.textContent = formatDate(endTs);
 
-        // Barra entre os dois handles
         const top = 100 - endVal;
         const height = endVal - startVal;
         track.style.top = `${top}%`;
@@ -379,13 +385,13 @@ function formatDate(ts) {
         month: "2-digit",
     });
 }
+
 function filtrarSismosPorData(startTs, endTs) {
     markersLayer.clearLayers();
 
     const heatPoints = [];
     let maxMagnitude = 0;
 
-    // Primeiro passa para achar a magnitude máxima do intervalo filtrado
     state.earthquakes.forEach(eq => {
         if (eq.time >= startTs && eq.time <= endTs) {
             const mag = eq.data?.magnitude ?? 0;
@@ -397,38 +403,7 @@ function filtrarSismosPorData(startTs, endTs) {
         if (eq.time < startTs || eq.time > endTs) return;
 
         const s = eq.data;
-        const recente = ultimas24h(s.time);
-
-        // Marcador principal
-        eq.marker.addTo(markersLayer);
-
-        // Halo de pulsação (sismos recentes)
-        if (recente) {
-            const tamanho = (raioMagnitude(s.magnitude) + 8) * 2;
-
-            const halo = L.marker([s.latitude, s.longitude], {
-                interactive: false,
-                zIndexOffset: -1000,
-                icon: L.divIcon({
-                    className: "pulse-marker",
-                    html: `<div class="pulse" style="width:${tamanho}px;height:${tamanho}px"></div>`,
-                    iconSize: [tamanho, tamanho],
-                    iconAnchor: [tamanho / 2, tamanho / 2]
-                })
-            });
-            halo.addTo(markersLayer);
-        }
-
-        // Hit area
-        const hitArea = L.circleMarker([s.latitude, s.longitude], {
-            radius: Math.max(raioMagnitude(s.magnitude), 18),
-            stroke: false,
-            fill: true,
-            fillColor: "#ffffff",
-            fillOpacity: 0.01
-        });
-        hitArea.on("click", () => eq.marker.openPopup());
-        hitArea.addTo(markersLayer);
+        criarMarcador(s);   // reutiliza a mesma lógica visual
 
         // Heatmap
         const intensidade = maxMagnitude > 0
@@ -449,21 +424,14 @@ function ajustarAlturaIntervalo() {
     const mapEl = document.getElementById("map");
     const mapHeight = mapEl.clientHeight;
 
-    // Espaço ocupado pelos botões de cima (basemap + heat) ≈ 100px
-    // Espaço da legenda de magnitude ≈ 160px
-    // Padding e margem de segurança
     const topButtons = 110;
-    const bottomLegend = 170;
+    const bottomLegend = 390;
     const padding = 40;
 
     const available = mapHeight - topButtons - bottomLegend - padding;
-
-    // Altura mínima e máxima razoáveis
     const height = Math.max(120, Math.min(available, 380));
 
     wrapper.style.height = `${height}px`;
-
-    // Garante que o contentor pai também cresce
     control.style.height = "auto";
 }
 
@@ -498,7 +466,6 @@ function definirIntervalo() {
             </div>
         `;
 
-        // Impede que o clique no controlo interaja com o mapa
         L.DomEvent.disableClickPropagation(div);
         L.DomEvent.disableScrollPropagation(div);
 
@@ -507,7 +474,6 @@ function definirIntervalo() {
 
     intervalo.addTo(map);
 
-    // Inicializa a lógica depois de o controlo estar no DOM
     ajustarAlturaIntervalo();
     initDateRange();
 }
@@ -521,7 +487,7 @@ function definirLegenda() {
         const div = L.DomUtil.create("div", "legend-control");
 
         div.innerHTML = `
-            <button id="legend-btn" title="Legenda de Magnitude" class="legend-toggle">
+            <button id="legend-btn" title="Legenda" class="legend-toggle">
                 <i class="bi bi-info-square-fill"></i>
             </button>
 
@@ -555,13 +521,23 @@ function definirLegenda() {
                         <td><i class="bi bi-record-circle-fill" style="color:#8E0000"></i></td>
                         <td>≥ 6.0</td>
                     </tr>
+                    <tr class="legend-divider">
+                        <td colspan="2"></td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="legend-sentido-icon">
+                                <i class="bi bi-activity"></i>
+                            </span>
+                        </td>
+                        <td>Sentido</td>
+                    </tr>
                 </table>
             </div>
         `;
 
         L.DomEvent.disableClickPropagation(div);
 
-        // Toggle da legenda
         const btn = div.querySelector("#legend-btn");
         const panel = div.querySelector("#legend-panel");
 
@@ -609,14 +585,11 @@ function configurarControles() {
             } else {
                 map.removeLayer(heatLayer);
             }
-
             return;
         }
 
         const basemapBtn = e.target.closest("#basemap-btn");
-        if (!basemapBtn) {
-            return;
-        }
+        if (!basemapBtn) return;
 
         state.darkMode = !state.darkMode;
         if (state.darkMode) {
@@ -635,9 +608,6 @@ function configurarControles() {
 
 async function carregarPlacas() {
     try {
-        // https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json
-        // Thanks to Fraxen for the tectonic plates GeoJSON data
-        // Repo: https://github.com/fraxen/tectonicplates/
         const response = await fetch("/static/data/plates.geojson", {
             cache: "no-store"
         });
@@ -648,8 +618,6 @@ async function carregarPlacas() {
 
         const geojson = await response.json();
         platesLayer.addData(geojson);
-
-        // Atualiza a visibilidade depois de carregar os dados
         atualizarVisibilidadePlacas();
 
     } catch (error) {
@@ -679,10 +647,9 @@ async function carregarSismos() {
     } catch (error) {
         console.error(error);
         if (!state.hasLoaded) {
-            alert("Não foi possível carregar os dados.");
+            console.error("Não foi possível carregar os dados.");
         }
     } finally {
-        // Always clear overlay so a failed API never leaves a blank screen
         loadingEl.style.display = "none";
     }
 }
@@ -700,9 +667,7 @@ function iniciarAtualizacoes() {
 window.zoom = function (i) {
     const s = state.markers[i]?.getLatLng ? state.markers[i].getLatLng() : null;
 
-    if (!s) {
-        return;
-    }
+    if (!s) return;
 
     map.flyTo([s.lat, s.lng], 9, {
         duration: 1.2
@@ -712,12 +677,9 @@ window.zoom = function (i) {
 };
 
 function ultimas24h(dataHora) {
-
     const agora = Date.now();
     const data = new Date(dataHora).getTime();
-
     return (agora - data) <= 24 * 60 * 60 * 1000;
-
 }
 
 function inicializarMapa() {
@@ -728,8 +690,6 @@ function inicializarMapa() {
     carregarSismos();
     iniciarAtualizacoes();
     map.on("click", selecionarSismoMaisProximo);
-
-    // Atualiza a visibilidade das placas sempre que o zoom muda
     map.on("zoomend", atualizarVisibilidadePlacas);
     window.addEventListener("resize", ajustarAlturaIntervalo);
 }

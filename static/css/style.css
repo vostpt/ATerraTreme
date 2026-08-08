@@ -685,7 +685,6 @@ body {
     gap: 8px;
 }
 
-/* Botão do mesmo tamanho dos outros controlos */
 .legend-toggle {
     width: 42px;
     height: 42px;
@@ -711,7 +710,7 @@ body {
     pointer-events: none;
 }
 
-/* Painel da legenda */
+/* Painel – largura fixa e estável */
 .legend-panel {
     background: #1b1f24;
     padding: 10px 12px;
@@ -719,7 +718,8 @@ body {
     color: #fff;
     font-size: 13px;
     box-shadow: 0 3px 12px rgba(0, 0, 0, .35);
-    min-width: 130px;
+    width: 118px;          /* largura controlada */
+    box-sizing: border-box;
 }
 
 .legend-panel.hidden {
@@ -747,12 +747,37 @@ body {
 .legend-table td {
     padding: 3px 4px;
     vertical-align: middle;
+    white-space: nowrap;
 }
 
 .legend-table td:first-child {
     width: 22px;
     text-align: center;
-}   
+}
+
+/* Separador visual entre magnitude e sentido */
+.legend-divider td {
+    padding: 6px 0 4px;
+    border-top: 1px solid #3a3f47;
+}
+
+/* Ícone de sentido na legenda */
+.legend-sentido-icon {
+    display: inline-flex;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #ff7043;
+    border: 1.5px solid #fff;
+    align-items: center;
+    justify-content: center;
+}
+
+.legend-sentido-icon i {
+    color: #fff;
+    font-size: 8px;
+    line-height: 1;
+}
 
 /*==================================================
 =              LEAFLET ZOOM CONTROLS               =
@@ -834,4 +859,27 @@ body {
         opacity: 0;
     }
 
+}
+
+/* Badge de sismo sentido */
+.sentido-badge {
+    background: transparent !important;
+    border: none !important;
+}
+
+.sentido-badge-inner {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 1.5px solid #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.sentido-badge-inner i {
+    color: #ffffff;
+    font-size: 10px;
+    line-height: 1;
 }
