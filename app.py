@@ -16,6 +16,7 @@ import io
 import gc
 from collections import deque
 from dotenv import load_dotenv
+from shapely.geometry import box
 
 load_dotenv()
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
@@ -49,59 +50,843 @@ def overlay_text(img, text, position, font, color):
 
 
 def create_map_image(df) -> Image.Image:
-    """Gera o mapa em memória e devolve um PIL.Image (sem gravar em disco)."""
+    """
+    Gera o mapa local do sismo.
+
+    Características:
+      - Sem OpenStreetMap
+      - Sem Contextily
+      - Sem APIs de mapas
+      - Sem API keys
+      - Sem pedidos HTTP
+      - Natural Earth distribuído localmente
+      - Zoom automático centrado no epicentro
+      - Proteção individual contra camadas em falta
+      - Compatível com versões de GeoPandas sem GeoSeries.from_bbox()
+    """
+
+    from pathlib import Path
+
+    import io
+    import math
+
+    import geopandas as gpd
+    import matplotlib.pyplot as plt
+
+    from shapely.geometry import box
+
+    # --------------------------------------------------------
+    # Último sismo
+    # --------------------------------------------------------
+
     latest = df.iloc[-1]
 
-    gdf = gpd.GeoDataFrame(
-        df,
-        geometry=gpd.points_from_xy(df.longitude, df.latitude),
-        crs="EPSG:4326"
-    ).to_crs(epsg=3857)
+    latitude = float(latest["latitude"])
+    longitude = float(latest["longitude"])
+    magnitude = float(latest["scale"])
 
-    latest_point = gdf.iloc[-1]
-    cx = latest_point.geometry.x
-    cy = latest_point.geometry.y
-    window = 175_000
+    MAPDATA = Path("assets/mapdata")
 
-    fig = plt.figure(figsize=(6, 6), dpi=180)
-    ax = fig.add_axes([0, 0, 1, 1])
+    # --------------------------------------------------------
+    # Ficheiros Natural Earth
+    # --------------------------------------------------------
 
-    ax.set_xlim(cx - window, cx + window)
-    ax.set_ylim(cy - window, cy + window)
-    ax.set_aspect("equal")
+    countries_file = (
+        MAPDATA / "ne_10m_admin_0_countries.shp"
+    )
 
-    try:
-        ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik, attribution=False)
-    except Exception as e:
-        print(f"Aviso basemap: {e}")
+    coastline_file = (
+        MAPDATA / "ne_10m_coastline.shp"
+    )
 
-    # Halos e epicentro
-    ax.scatter(cx, cy, s=7000, color="red", alpha=0.10, zorder=2)
-    ax.scatter(cx, cy, s=2500, color="red", alpha=0.25, zorder=3)
-    ax.scatter(cx, cy, s=350, marker="*", color="darkred", edgecolors="white", linewidth=1.5, zorder=4)
+    places_file = (
+        MAPDATA / "ne_10m_populated_places.shp"
+    )
+
+    rivers_file = (
+        MAPDATA / "ne_10m_rivers_lake_centerlines.shp"
+    )
+
+    lakes_file = (
+        MAPDATA / "ne_10m_lakes.shp"
+    )
+
+    # --------------------------------------------------------
+    # Zoom automático
+    # --------------------------------------------------------
+    #
+    # Define o raio aproximado do mapa em km.
+    #
+    # Sismos pequenos:
+    #   zoom mais próximo
+    #
+    # Sismos grandes:
+    #   zoom progressivamente maior
+    #
+    # Mantemos sempre algum contexto geográfico.
+    #
+
+    if magnitude < 3.0:
+
+        radius_km = 180
+
+    elif magnitude < 4.0:
+
+        radius_km = 250
+
+    elif magnitude < 5.0:
+
+        radius_km = 400
+
+    elif magnitude < 6.0:
+
+        radius_km = 600
+
+    else:
+
+        radius_km = 900
+
+    # --------------------------------------------------------
+    # Converter km para graus
+    # --------------------------------------------------------
+    #
+    # 1 grau de latitude ≈ 111 km.
+    #
+    # Para longitude usamos o cos(latitude), porque a
+    # distância entre meridianos diminui com a latitude.
+    #
+
+    lat_radius = radius_km / 111.0
+
+    cos_lat = math.cos(
+        math.radians(latitude)
+    )
+
+    # Evitar divisão por zero perto dos polos.
+
+    cos_lat = max(
+        abs(cos_lat),
+        0.15
+    )
+
+    lon_radius = (
+        radius_km /
+        (111.0 * cos_lat)
+    )
+
+    WEST = longitude - lon_radius
+    EAST = longitude + lon_radius
+
+    SOUTH = latitude - lat_radius
+    NORTH = latitude + lat_radius
+
+    # --------------------------------------------------------
+    # Limites geográficos razoáveis
+    # --------------------------------------------------------
+
+    WEST = max(WEST, -180)
+    EAST = min(EAST, 180)
+
+    SOUTH = max(SOUTH, -90)
+    NORTH = min(NORTH, 90)
+
+    # --------------------------------------------------------
+    # Ler dados cartográficos individualmente
+    # --------------------------------------------------------
+    #
+    # Uma camada em falta NÃO deve impedir as outras
+    # de aparecerem.
+    #
+
+    countries = None
+    coastline = None
+    places = None
+    rivers = None
+    lakes = None
+
+    def load_layer(path, name):
+        """
+        Carrega uma camada sem interromper o mapa caso
+        o ficheiro esteja ausente ou inválido.
+        """
+
+        if not path.exists():
+
+            print(
+                f"Aviso: camada não encontrada: {path}"
+            )
+
+            return None
+
+        try:
+
+            layer = gpd.read_file(path)
+
+            if layer.empty:
+
+                print(
+                    f"Aviso: camada vazia: {name}"
+                )
+
+                return None
+
+            # ------------------------------------------------
+            # CRS
+            # ------------------------------------------------
+
+            if layer.crs is None:
+
+                print(
+                    f"Aviso: {name} não possui CRS. "
+                    f"A assumir EPSG:4326."
+                )
+
+                layer = layer.set_crs(
+                    "EPSG:4326"
+                )
+
+            else:
+
+                layer = layer.to_crs(
+                    "EPSG:4326"
+                )
+
+            return layer
+
+        except Exception as e:
+
+            print(
+                f"Aviso: erro ao carregar "
+                f"{name}: {e}"
+            )
+
+            return None
+
+    countries = load_layer(
+        countries_file,
+        "countries"
+    )
+
+    coastline = load_layer(
+        coastline_file,
+        "coastline"
+    )
+
+    places = load_layer(
+        places_file,
+        "places"
+    )
+
+    rivers = load_layer(
+        rivers_file,
+        "rivers"
+    )
+
+    lakes = load_layer(
+        lakes_file,
+        "lakes"
+    )
+
+    # --------------------------------------------------------
+    # Criar bounding box
+    # --------------------------------------------------------
+    #
+    # NÃO utilizar:
+    #
+    # gpd.GeoSeries.from_bbox(...)
+    #
+    # porque essa API não existe em algumas versões
+    # do GeoPandas.
+    #
+    # shapely.geometry.box() é compatível.
+    #
+
+    bbox_geometry = box(
+        WEST,
+        SOUTH,
+        EAST,
+        NORTH
+    )
+
+    # --------------------------------------------------------
+    # Cortar uma camada
+    # --------------------------------------------------------
+
+    def clip_layer(layer, name):
+
+        if layer is None:
+            return None
+
+        try:
+
+            # ------------------------------------------------
+            # Usamos clip diretamente com a geometria.
+            #
+            # Isto evita depender de funcionalidades
+            # específicas de versões do GeoPandas.
+            # ------------------------------------------------
+
+            clipped = gpd.clip(
+                layer,
+                bbox_geometry
+            )
+
+            if clipped.empty:
+
+                print(
+                    f"Aviso: {name} não possui "
+                    f"dados dentro do mapa."
+                )
+
+                return None
+
+            return clipped
+
+        except Exception as e:
+
+            print(
+                f"Aviso: erro ao cortar "
+                f"{name}: {e}"
+            )
+
+            return layer
+
+    countries = clip_layer(
+        countries,
+        "countries"
+    )
+
+    coastline = clip_layer(
+        coastline,
+        "coastline"
+    )
+
+    places = clip_layer(
+        places,
+        "places"
+    )
+
+    rivers = clip_layer(
+        rivers,
+        "rivers"
+    )
+
+    lakes = clip_layer(
+        lakes,
+        "lakes"
+    )
+
+    # --------------------------------------------------------
+    # Figura
+    # --------------------------------------------------------
+
+    fig = plt.figure(
+        figsize=(6, 6),
+        dpi=180
+    )
+
+    ax = fig.add_axes(
+        [0, 0, 1, 1]
+    )
+
+    ax.set_facecolor(
+        "#dcecf4"
+    )
+
+    # --------------------------------------------------------
+    # Países
+    # --------------------------------------------------------
+
+    if (
+        countries is not None
+        and not countries.empty
+    ):
+
+        try:
+
+            countries.plot(
+                ax=ax,
+
+                color="#eeeeea",
+
+                edgecolor="#b6b6b2",
+
+                linewidth=0.45,
+
+                zorder=1
+            )
+
+        except Exception as e:
+
+            print(
+                f"Aviso ao desenhar países: {e}"
+            )
+
+    # --------------------------------------------------------
+    # Lagos
+    # --------------------------------------------------------
+
+    if (
+        lakes is not None
+        and not lakes.empty
+    ):
+
+        try:
+
+            lakes.plot(
+                ax=ax,
+
+                color="#dcecf4",
+
+                edgecolor="#a9cddc",
+
+                linewidth=0.35,
+
+                zorder=2
+            )
+
+        except Exception as e:
+
+            print(
+                f"Aviso ao desenhar lagos: {e}"
+            )
+
+    # --------------------------------------------------------
+    # Rios
+    # --------------------------------------------------------
+
+    if (
+        rivers is not None
+        and not rivers.empty
+    ):
+
+        try:
+
+            important_rivers = rivers
+
+            # Natural Earth normalmente possui
+            # SCALERANK/scalerank dependendo da versão.
+
+            scalerank_column = None
+
+            if "scalerank" in rivers.columns:
+
+                scalerank_column = "scalerank"
+
+            elif "SCALERANK" in rivers.columns:
+
+                scalerank_column = "SCALERANK"
+
+            if scalerank_column:
+
+                important_rivers = rivers[
+                    rivers[
+                        scalerank_column
+                    ].fillna(99) <= 6
+                ]
+
+            if not important_rivers.empty:
+
+                important_rivers.plot(
+                    ax=ax,
+
+                    color="#8ebfd3",
+
+                    linewidth=0.45,
+
+                    alpha=0.85,
+
+                    zorder=3
+                )
+
+        except Exception as e:
+
+            print(
+                f"Aviso ao desenhar rios: {e}"
+            )
+
+    # --------------------------------------------------------
+    # Costa
+    # --------------------------------------------------------
+
+    if (
+        coastline is not None
+        and not coastline.empty
+    ):
+
+        try:
+
+            coastline.plot(
+                ax=ax,
+
+                color="#777777",
+
+                linewidth=0.75,
+
+                zorder=4
+            )
+
+        except Exception as e:
+
+            print(
+                f"Aviso ao desenhar costa: {e}"
+            )
+
+    # --------------------------------------------------------
+    # Cidades
+    # --------------------------------------------------------
+
+    if (
+        places is not None
+        and not places.empty
+    ):
+
+        try:
+
+            major_places = places
+
+            # ------------------------------------------------
+            # Selecionar cidades por população
+            # ------------------------------------------------
+
+            if "POP_MAX" in places.columns:
+
+                pop = (
+                    places["POP_MAX"]
+                    .fillna(0)
+                )
+
+                major_places = places[
+                    pop >= 100000
+                ]
+
+            elif "pop_max" in places.columns:
+
+                pop = (
+                    places["pop_max"]
+                    .fillna(0)
+                )
+
+                major_places = places[
+                    pop >= 100000
+                ]
+
+            # ------------------------------------------------
+            # Alternativa usando SCALERANK
+            # ------------------------------------------------
+
+            elif "SCALERANK" in places.columns:
+
+                major_places = places[
+                    places["SCALERANK"]
+                    .fillna(99)
+                    <= 7
+                ]
+
+            elif "scalerank" in places.columns:
+
+                major_places = places[
+                    places["scalerank"]
+                    .fillna(99)
+                    <= 7
+                ]
+
+            # ------------------------------------------------
+            # Limitar número de cidades
+            # ------------------------------------------------
+
+            if len(major_places) > 35:
+
+                if "POP_MAX" in major_places.columns:
+
+                    major_places = (
+                        major_places
+                        .sort_values(
+                            "POP_MAX",
+                            ascending=False
+                        )
+                        .head(35)
+                    )
+
+                elif "pop_max" in major_places.columns:
+
+                    major_places = (
+                        major_places
+                        .sort_values(
+                            "pop_max",
+                            ascending=False
+                        )
+                        .head(35)
+                    )
+
+                else:
+
+                    major_places = (
+                        major_places
+                        .head(35)
+                    )
+
+            # ------------------------------------------------
+            # Desenhar pontos
+            # ------------------------------------------------
+
+            if not major_places.empty:
+
+                major_places.plot(
+                    ax=ax,
+
+                    color="#555555",
+
+                    markersize=8,
+
+                    alpha=0.9,
+
+                    zorder=6
+                )
+
+                # --------------------------------------------
+                # Encontrar nome da cidade
+                # --------------------------------------------
+
+                name_column = None
+
+                for candidate in (
+                    "NAMEASCII",
+                    "nameascii",
+                    "NAME",
+                    "name",
+                    "NAMEPAR",
+                    "NAMEARAB"
+                ):
+
+                    if (
+                        candidate
+                        in major_places.columns
+                    ):
+
+                        name_column = candidate
+
+                        break
+
+                # --------------------------------------------
+                # Labels
+                # --------------------------------------------
+
+                if name_column:
+
+                    for _, city in (
+                        major_places.iterrows()
+                    ):
+
+                        try:
+
+                            if city.geometry is None:
+                                continue
+
+                            if city.geometry.is_empty:
+                                continue
+
+                            x = city.geometry.x
+                            y = city.geometry.y
+
+                            name = str(
+                                city[name_column]
+                            )
+
+                            if not name:
+                                continue
+
+                            ax.annotate(
+                                name,
+
+                                xy=(x, y),
+
+                                xytext=(4, 4),
+
+                                textcoords=(
+                                    "offset points"
+                                ),
+
+                                fontsize=6.2,
+
+                                color="#444444",
+
+                                fontweight="bold",
+
+                                zorder=7
+                            )
+
+                        except Exception:
+
+                            continue
+
+        except Exception as e:
+
+            print(
+                f"Aviso ao desenhar cidades: {e}"
+            )
+
+    # --------------------------------------------------------
+    # Epicentro
+    # --------------------------------------------------------
+
+    ax.scatter(
+        longitude,
+        latitude,
+
+        s=7000,
+
+        color="red",
+
+        alpha=0.10,
+
+        zorder=10
+    )
+
+    ax.scatter(
+        longitude,
+        latitude,
+
+        s=2500,
+
+        color="red",
+
+        alpha=0.25,
+
+        zorder=11
+    )
+
+    ax.scatter(
+        longitude,
+        latitude,
+
+        s=350,
+
+        marker="*",
+
+        color="darkred",
+
+        edgecolors="white",
+
+        linewidth=1.5,
+
+        zorder=12
+    )
+
+    # --------------------------------------------------------
+    # Magnitude
+    # --------------------------------------------------------
 
     ax.text(
-        cx, cy + 25000, f"M {latest['scale']:.1f}",
-        fontsize=16, fontweight="bold", ha="center", va="bottom",
+        longitude,
+
+        latitude + (
+            lat_radius * 0.08
+        ),
+
+        f"M {magnitude:.1f}",
+
+        fontsize=16,
+
+        fontweight="bold",
+
+        ha="center",
+
+        va="bottom",
+
         color="black",
-        bbox=dict(facecolor="white", edgecolor="black", alpha=0.9, boxstyle="round,pad=0.3"),
-        zorder=5
+
+        bbox=dict(
+            facecolor="white",
+
+            edgecolor="black",
+
+            alpha=0.92,
+
+            boxstyle="round,pad=0.3"
+        ),
+
+        zorder=13
+    )
+
+    # --------------------------------------------------------
+    # Limites do mapa
+    # --------------------------------------------------------
+
+    ax.set_xlim(
+        WEST,
+        EAST
+    )
+
+    ax.set_ylim(
+        SOUTH,
+        NORTH
+    )
+
+    ax.set_aspect(
+        "equal",
+        adjustable="box"
     )
 
     ax.set_axis_off()
-    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
-    # Guardar diretamente em memória
+    # --------------------------------------------------------
+    # Atribuição
+    # --------------------------------------------------------
+
+    ax.text(
+        0.995,
+
+        0.012,
+
+        "Natural Earth",
+
+        transform=ax.transAxes,
+
+        ha="right",
+
+        va="bottom",
+
+        fontsize=5.5,
+
+        color="#666666",
+
+        alpha=0.8,
+
+        zorder=20
+    )
+
+    # --------------------------------------------------------
+    # Gerar PNG
+    # --------------------------------------------------------
+
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=180, facecolor="white", pad_inches=0)
-    plt.close(fig)          # fecha a figura
-    plt.close('all')        # segurança extra
+
+    fig.savefig(
+        buf,
+
+        format="png",
+
+        dpi=180,
+
+        facecolor="white",
+
+        pad_inches=0
+    )
+
+    plt.close(fig)
+
+    plt.close("all")
+
     buf.seek(0)
 
-    img = Image.open(buf).convert("RGB")
-    buf.close()
-    return img
+    img = Image.open(
+        buf
+    ).convert("RGB")
 
+    buf.close()
+
+    return img
 
 def generate_final_image(sismo_data) -> bytes:
     """Gera a imagem final completa e devolve os bytes."""
@@ -274,8 +1059,8 @@ def monitor_sismos():
                 time.sleep(45)
                 continue
 
-            novos = [s for s in data["data"] if s["time"] not in sismos_enviados]
-            # novos = data["data"][:10]  # apenas os 10 mais recentes (for testing purposes)
+            # novos = [s for s in data["data"] if s["time"] not in sismos_enviados]
+            novos = data["data"][:10]  # apenas os 10 mais recentes (for testing purposes)
             
             if not novos:
                 consecutive_errors = 0
