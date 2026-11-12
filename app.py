@@ -17,6 +17,7 @@ import threading
 import time
 import io
 import gc
+import json
 from collections import deque
 from dotenv import load_dotenv
 import logging
@@ -74,6 +75,9 @@ BOUNDING_BOXES = [
 MAX_SENT = 5000
 sismos_enviados = set()
 _sismos_order = deque(maxlen=MAX_SENT)  # para limpeza FIFO
+
+# Ficheiro de persistência do histórico
+HISTORY_FILE = Path("sismos.json")
 
 # ============================================================
 # HTTP / IDENTIFICAÇÃO DA APLICAÇÃO
@@ -140,6 +144,44 @@ PORTUGAL_TZ = ZoneInfo("Europe/Lisbon")
 # Lock para evitar geração simultânea de imagens
 image_lock = threading.Lock()
 
+
+def load_enviados():
+    """Carrega o histórico de sismos já enviados a partir do ficheiro JSON."""
+    if not HISTORY_FILE.exists():
+        print("Nenhum histórico de sismos encontrado. A começar de novo.")
+        return
+
+    try:
+        data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            print("Histórico inválido (não é uma lista). A ignorar.")
+            return
+
+        sismos_enviados.clear()
+        _sismos_order.clear()
+
+        # Mantém apenas os últimos MAX_SENT
+        for sismo_id in data[-MAX_SENT:]:
+            sismos_enviados.add(sismo_id)
+            _sismos_order.append(sismo_id)
+
+        print(f"Carregados {len(sismos_enviados)} sismos do histórico.")
+    except Exception as e:
+        print(f"Erro ao carregar histórico de sismos: {e}")
+
+
+def save_enviados():
+    """Grava o histórico atual de sismos enviados no ficheiro JSON."""
+    try:
+        # Guarda pela ordem do deque (mais antigos → mais recentes)
+        HISTORY_FILE.write_text(
+            json.dumps(list(_sismos_order), ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"Erro ao gravar histórico de sismos: {e}")
+
+
 def in_bounding_boxes(sismo):
     lat = sismo.get("latitude")
     lon = sismo.get("longitude")
@@ -156,9 +198,11 @@ def in_bounding_boxes(sismo):
 
     return False
 
+
 def overlay_text(img, text, position, font, color):
     draw = ImageDraw.Draw(img)
     draw.text(position, text, font=font, fill=color)
+
 
 def get_map_provider():
     if MAP_PROVIDER == "cartodb":
@@ -170,17 +214,7 @@ def get_map_provider():
 def create_map_image(df) -> Image.Image:
     """
     Gera o mapa em memória.
-
-    Características:
-    - User-Agent identificável
-    - Referer
-    - cache persistente do contextily
-    - zoom controlado
-    - timeout
-    - attribution
-    - fallback sem basemap caso o provider falhe
     """
-
     latest = df.iloc[-1]
 
     gdf = gpd.GeoDataFrame(
@@ -410,7 +444,6 @@ def generate_final_image(sismo_data) -> bytes:
         overlay_text(template, str(latest['date']), (242, 772), font, "#00A396")
         overlay_text(template, str(latest['intensity']), (520, 832), font, "#00A396")
 
-
         # Image with just info (no map)
         info_buf = io.BytesIO()
         template.save("assets/SISMO_INFO.png", optimize=True)
@@ -462,7 +495,11 @@ def enviar_discord(sismo, image_bytes: bytes, info_image: bytes, map_image: byte
 
     for tentativa in range(1, tentativas + 1):
         try:
-            files = {"file1": ("SISMO.png", image_bytes, "image/png"), "file2": ("SISMO_INFO.png", info_image, "image/png"), "file3": ("SISMO_MAP.png", map_image, "image/png")}
+            files = {
+                "file1": ("SISMO.png", image_bytes, "image/png"),
+                "file2": ("SISMO_INFO.png", info_image, "image/png"),
+                "file3": ("SISMO_MAP.png", map_image, "image/png")
+            }
             r = session.post(
                 DISCORD_WEBHOOK,
                 data={"content": mensagem},
@@ -504,9 +541,7 @@ def enviar_firebase(sismo):
         message = messaging.Message(
             notification=messaging.Notification(
                 title=f"Sismo {sismo['scale']} em {sismo['location']}",
-                body=(
-                    f"Detetado às {sismo['date']}."
-                ),
+                body=f"Detetado às {sismo['date']}.",
             ),
             data={
                 "tipo": "sismo",
@@ -580,7 +615,7 @@ def obter_sismos():
                 except Exception:
                     s["datetime"] = datetime.now(timezone.utc)
 
-        # Timezone de Potugal Continental
+        # Timezone de Portugal Continental
         s["time_pt"] = s["datetime"].astimezone(PORTUGAL_TZ).strftime("%d-%m-%Y pelas %H:%M")
 
     sismos.sort(key=lambda x: x["datetime"], reverse=True)
@@ -593,14 +628,20 @@ def obter_sismos():
 
 
 def add_enviado(sismo_id: str):
-    """Adiciona ao set e remove o mais antigo se ultrapassar o limite."""
+    """Adiciona ao set, atualiza o deque e grava no disco."""
     if sismo_id in sismos_enviados:
         return
+
     if len(sismos_enviados) >= MAX_SENT:
         oldest = _sismos_order.popleft()
         sismos_enviados.discard(oldest)
+
     sismos_enviados.add(sismo_id)
     _sismos_order.append(sismo_id)
+
+    # Persistir imediatamente
+    save_enviados()
+
 
 def monitor_sismos():
     print("Monitor de sismos iniciado.")
@@ -680,7 +721,7 @@ def monitor_sismos():
             consecutive_errors = 0
             gc.collect()
 
-            # CEMS: a cada ~10 ciclos (~7–8 min), independente de haver sismos IPMA
+            # CEMS: a cada ~10 ciclos (~7–8 min)
             if cycle_count % 10 == 0:
                 try:
                     cems_novos = poll_new_earthquake_activations(
@@ -747,14 +788,18 @@ def download_image():
 
 
 def bootstrap_monitor():
-    """Seed known earthquakes then enter the Discord monitor loop."""
+    """Carrega histórico persistido e marca sismos atuais da API como já vistos."""
+    # 1. Carregar do disco (prioridade)
+    load_enviados()
+
+    # 2. Rede de segurança: marcar também os que a API está a devolver agora
     try:
         data = obter_sismos()
         for s in data["data"]:
             add_enviado(s["time"])
-        print(f"{len(sismos_enviados)} sismos existentes ignorados.")
+        print(f"Bootstrap concluído. Total de sismos conhecidos: {len(sismos_enviados)}")
     except Exception as e:
-        print(f"Aviso: não foi possível pré-carregar sismos: {e}")
+        print(f"Aviso: não foi possível pré-carregar sismos da API: {e}")
 
     monitor_sismos()
 
